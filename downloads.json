@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "repository": "NeoPanic/Glim",
+  "timezone": "Asia/Shanghai",
+  "metric": "published-release-asset-downloads",
+  "snapshots": [
+    {
+      "date": "2026-10-12",
+      "observed_at": "2026-10-12T11:57:55+08:00",
+      "total": 19,
+      "release_count": 12,
+      "asset_count": 40
+    }
+  ]
+}
