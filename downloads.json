@@ -6,10 +6,10 @@
   "snapshots": [
     {
       "date": "2026-10-12",
-      "observed_at": "2026-10-12T12:01:27+08:00",
-      "total": 19,
-      "release_count": 12,
-      "asset_count": 40
+      "observed_at": "2026-10-12T16:33:19+08:00",
+      "total": 50,
+      "release_count": 14,
+      "asset_count": 56
     }
   ]
 }
