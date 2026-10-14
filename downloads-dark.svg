@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="430" viewBox="0 0 960 430" role="img" aria-labelledby="title desc">
 <title id="title">NeoPanic/Glim release download history</title>
-<desc id="desc">Daily observed totals for published GitHub release assets. Tracking began 2026-10-12. Latest: 138 on 2026-10-14. No earlier history is estimated.</desc>
+<desc id="desc">Daily observed totals for published GitHub release assets. Tracking began 2026-10-12. Latest: 164 on 2026-10-15. No earlier history is estimated.</desc>
 <rect x=".5" y=".5" width="959" height="429" rx="16" fill="#0d1117" stroke="#26313c"/>
 <g font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif">
 <text x="32" y="43" fill="#e6edf3" font-size="21" font-weight="650">Release download history</text>
 <text x="32" y="69" fill="#919ba7" font-size="13">NeoPanic/Glim · Daily snapshots · Asia/Shanghai</text>
-<text x="916" y="47" text-anchor="end" fill="#64d9bd" font-size="32" font-weight="700">138</text>
+<text x="916" y="47" text-anchor="end" fill="#64d9bd" font-size="32" font-weight="700">164</text>
 <text x="916" y="70" text-anchor="end" fill="#919ba7" font-size="12">total attachment downloads</text>
 <path d="M78 354H912" stroke="#26313c"/>
 <text x="66" y="358" text-anchor="end" fill="#919ba7" font-size="12">0</text>
@@ -17,11 +17,12 @@
 <text x="66" y="188.5" text-anchor="end" fill="#919ba7" font-size="12">150</text>
 <path d="M78 128H912" stroke="#26313c"/>
 <text x="66" y="132" text-anchor="end" fill="#919ba7" font-size="12">200</text>
-<path d="M78.00 297.50 L495.00 225.18 L912.00 198.06 L912.00 354 L78.00 354Z" fill="#64d9bd" fill-opacity=".08"/>
-<path d="M78.00 297.50 L495.00 225.18 L912.00 198.06" fill="none" stroke="#64d9bd" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M78.00 297.50 L356.00 225.18 L634.00 198.06 L912.00 168.68 L912.00 354 L78.00 354Z" fill="#64d9bd" fill-opacity=".08"/>
+<path d="M78.00 297.50 L356.00 225.18 L634.00 198.06 L912.00 168.68" fill="none" stroke="#64d9bd" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
 <text x="78.00" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-12</text>
-<text x="495.00" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-13</text>
-<text x="912.00" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-14</text>
-<circle cx="912.00" cy="198.06" r="9" fill="#64d9bd" fill-opacity=".15"/><circle cx="912.00" cy="198.06" r="4.5" fill="#64d9bd"/>
+<text x="356.00" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-13</text>
+<text x="634.00" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-14</text>
+<text x="912.00" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-15</text>
+<circle cx="912.00" cy="168.68" r="9" fill="#64d9bd" fill-opacity=".15"/><circle cx="912.00" cy="168.68" r="4.5" fill="#64d9bd"/>
 <text x="32" y="409" fill="#919ba7" font-size="11">Recorded since 2026-10-12 · All release assets, including checksums · Not unique users or installs</text>
 </g></svg>
