@@ -1,29 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="430" viewBox="0 0 960 430" role="img" aria-labelledby="title desc">
 <title id="title">NeoPanic/Glim release download history</title>
-<desc id="desc">Daily observed totals for published GitHub release assets. Tracking began 2026-10-12. Latest: 184 on 2026-10-16. No earlier history is estimated.</desc>
+<desc id="desc">Daily observed totals for published GitHub release assets. Tracking began 2026-10-12. Latest: 203 on 2026-10-17. No earlier history is estimated.</desc>
 <rect x=".5" y=".5" width="959" height="429" rx="16" fill="#ffffff" stroke="#e8eef1"/>
 <g font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif">
 <text x="32" y="43" fill="#243d48" font-size="21" font-weight="650">Release download history</text>
 <text x="32" y="69" fill="#60717a" font-size="13">NeoPanic/Glim · Daily snapshots · Asia/Shanghai</text>
-<text x="916" y="47" text-anchor="end" fill="#238673" font-size="32" font-weight="700">184</text>
+<text x="916" y="47" text-anchor="end" fill="#238673" font-size="32" font-weight="700">203</text>
 <text x="916" y="70" text-anchor="end" fill="#60717a" font-size="12">total attachment downloads</text>
 <path d="M78 354H912" stroke="#e8eef1"/>
 <text x="66" y="358" text-anchor="end" fill="#60717a" font-size="12">0</text>
 <path d="M78 297.5H912" stroke="#e8eef1"/>
-<text x="66" y="301.5" text-anchor="end" fill="#60717a" font-size="12">50</text>
+<text x="66" y="301.5" text-anchor="end" fill="#60717a" font-size="12">100</text>
 <path d="M78 241H912" stroke="#e8eef1"/>
-<text x="66" y="245" text-anchor="end" fill="#60717a" font-size="12">100</text>
+<text x="66" y="245" text-anchor="end" fill="#60717a" font-size="12">200</text>
 <path d="M78 184.5H912" stroke="#e8eef1"/>
-<text x="66" y="188.5" text-anchor="end" fill="#60717a" font-size="12">150</text>
+<text x="66" y="188.5" text-anchor="end" fill="#60717a" font-size="12">300</text>
 <path d="M78 128H912" stroke="#e8eef1"/>
-<text x="66" y="132" text-anchor="end" fill="#60717a" font-size="12">200</text>
-<path d="M78.00 297.50 L286.50 225.18 L495.00 198.06 L703.50 168.68 L912.00 146.08 L912.00 354 L78.00 354Z" fill="#238673" fill-opacity=".08"/>
-<path d="M78.00 297.50 L286.50 225.18 L495.00 198.06 L703.50 168.68 L912.00 146.08" fill="none" stroke="#238673" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="66" y="132" text-anchor="end" fill="#60717a" font-size="12">400</text>
+<path d="M78.00 325.75 L244.80 289.59 L411.60 276.03 L578.40 261.34 L745.20 250.04 L912.00 239.31 L912.00 354 L78.00 354Z" fill="#238673" fill-opacity=".08"/>
+<path d="M78.00 325.75 L244.80 289.59 L411.60 276.03 L578.40 261.34 L745.20 250.04 L912.00 239.31" fill="none" stroke="#238673" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
 <text x="78.00" y="381" text-anchor="middle" fill="#60717a" font-size="12">2026-10-12</text>
-<text x="286.50" y="381" text-anchor="middle" fill="#60717a" font-size="12">2026-10-13</text>
-<text x="495.00" y="381" text-anchor="middle" fill="#60717a" font-size="12">2026-10-14</text>
-<text x="703.50" y="381" text-anchor="middle" fill="#60717a" font-size="12">2026-10-15</text>
-<text x="912.00" y="381" text-anchor="middle" fill="#60717a" font-size="12">2026-10-16</text>
-<circle cx="912.00" cy="146.08" r="9" fill="#238673" fill-opacity=".15"/><circle cx="912.00" cy="146.08" r="4.5" fill="#238673"/>
+<text x="244.80" y="381" text-anchor="middle" fill="#60717a" font-size="12">2026-10-13</text>
+<text x="411.60" y="381" text-anchor="middle" fill="#60717a" font-size="12">2026-10-14</text>
+<text x="745.20" y="381" text-anchor="middle" fill="#60717a" font-size="12">2026-10-16</text>
+<text x="912.00" y="381" text-anchor="middle" fill="#60717a" font-size="12">2026-10-17</text>
+<circle cx="912.00" cy="239.31" r="9" fill="#238673" fill-opacity=".15"/><circle cx="912.00" cy="239.31" r="4.5" fill="#238673"/>
 <text x="32" y="409" fill="#60717a" font-size="11">Recorded since 2026-10-12 · All release assets, including checksums · Not unique users or installs</text>
 </g></svg>
