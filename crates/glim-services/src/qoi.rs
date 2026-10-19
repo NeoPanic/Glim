@@ -125,6 +125,7 @@ pub(crate) fn prepare_with_size(
         cancel.check()?;
         stream.write_all(&output)?;
         stream.finish()?;
+        writer.finish()?;
     }
     let after = std::fs::metadata(path)?;
     ensure!(

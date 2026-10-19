@@ -140,6 +140,12 @@ impl StreamedText {
         if !self.complete && wanted > self.end {
             let mut buffer = vec![0; limits::IO_BUFFER_BYTES];
             let mut cache = self.file.reopen()?;
+            if start > self.end {
+                // Seeking past the cached range discards all older physical bytes.
+                // Otherwise a short tail page can expose stale data after its end.
+                cache.set_len(0)?;
+                self.start = self.end;
+            }
             while self.end < wanted && !self.complete {
                 operation.check()?;
                 self.lifetime.check()?;
