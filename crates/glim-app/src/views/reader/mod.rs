@@ -279,7 +279,7 @@ impl Reader {
                     .try_global::<crate::app::ReaderPreferences>()
                     .is_none_or(|prefs| prefs.html_preview);
                 (
-                    cx.new(|cx| native::NativeReader::html(path.clone(), None, active, window, cx)),
+                    cx.new(|cx| native::NativeReader::html(path.clone(), None, window, cx)),
                     active,
                 )
             });
@@ -977,7 +977,10 @@ impl Reader {
                 html: Some((browser, true)),
                 ..
             } => {
-                browser.update(cx, |browser, _| browser.set_html_open(open));
+                browser.update(cx, |browser, cx| {
+                    browser.set_html_open(open);
+                    browser.open(cx);
+                });
                 browser.clone().into_any_element()
             }
             Renderer::Paged { view, .. } => view.clone().into_any_element(),

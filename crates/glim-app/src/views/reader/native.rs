@@ -32,7 +32,6 @@ impl NativeReader {
     pub fn html(
         path: PathBuf,
         text: Option<String>,
-        active: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -54,9 +53,8 @@ impl NativeReader {
             html_anchor: None,
             _html_navigation: None,
         };
-        if active {
-            view.load_html();
-        }
+        // Create WebKit only when the preview is actually shown. Reader creation
+        // may immediately switch to source mode and does not need an AppKit view.
         view._html_navigation = Some(cx.spawn_in(window, async move |view, cx| {
             loop {
                 cx.background_executor()

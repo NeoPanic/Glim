@@ -243,9 +243,10 @@ pub(crate) fn prepare(
         let mut position = writer.stream_position()?;
         let mut input =
             MatroskaFile::open(PreviewInput::open(path, masks, budget.clone(), cancel)?)?;
+        let transaction = index.transaction()?;
         let mut following =
-            index.prepare("SELECT min(pts) FROM samples WHERE track=?1 AND pts>?2")?;
-        let mut seek = index.prepare("INSERT INTO seek VALUES (?1,?2,?3)")?;
+            transaction.prepare("SELECT min(pts) FROM samples WHERE track=?1 AND pts>?2")?;
+        let mut seek = transaction.prepare("INSERT INTO seek VALUES (?1,?2,?3)")?;
         let mut sequence = 0u32;
         while input.next_frame(&mut frame)? {
             budget.reset();
@@ -301,7 +302,7 @@ pub(crate) fn prepare(
         }
         drop(following);
         drop(seek);
-        index.execute_batch("COMMIT")?;
+        transaction.commit()?;
         write_seek_index(&mut writer, &index, tracks.len(), cancel)?;
         writer.flush()?;
     }
