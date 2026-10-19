@@ -64,22 +64,28 @@ pub(crate) fn thumbnail_png_cancellable(
         None
     };
     let path = converted.as_ref().map_or(path, |file| file.path());
-    let max_edge = image::ImageReader::open(path)
+    let dimensions = image::ImageReader::open(path)
         .ok()
         .and_then(|reader| reader.with_guessed_format().ok())
-        .and_then(|reader| reader.into_dimensions().ok())
-        .map_or(max_edge, |(width, height)| max_edge.min(width.max(height)));
-    // macOS ImageIO prepares the thumbnail outside the viewer's heap. The source is untouched.
+        .and_then(|reader| reader.into_dimensions().ok());
+    // Specify both dimensions for thin images: sips' longest-edge option can
+    // round the short edge to zero even though the source is valid.
     let mut command = Command::new("/usr/bin/sips");
+    if let Some((width, height)) = dimensions {
+        let longest = u64::from(width.max(height)).max(1);
+        let edge = u64::from(max_edge).min(longest);
+        let width = (u64::from(width) * edge / longest).max(1);
+        let height = (u64::from(height) * edge / longest).max(1);
+        command.args([
+            "--resampleHeightWidth",
+            &height.to_string(),
+            &width.to_string(),
+        ]);
+    } else {
+        command.args(["--resampleHeightWidthMax", &max_edge.to_string()]);
+    }
     command
-        .args([
-            "--resampleHeightWidthMax",
-            &max_edge.to_string(),
-            "--setProperty",
-            "format",
-            "png",
-            "--out",
-        ])
+        .args(["--setProperty", "format", "png", "--out"])
         .arg(&output)
         .arg(std::path::absolute(path)?)
         .stdin(Stdio::null())
