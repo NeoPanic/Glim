@@ -417,7 +417,7 @@ fn epub(path: &Path) -> Result<Book> {
                     book.toc.push(TocEntry {
                         title: text(link),
                         href,
-                        depth: depth,
+                        depth,
                     });
                 }
             }
@@ -447,7 +447,7 @@ fn epub(path: &Path) -> Result<Book> {
                 book.toc.push(TocEntry {
                     title: label,
                     href,
-                    depth: depth,
+                    depth,
                 });
             }
         }
@@ -745,11 +745,18 @@ fn chapter_structured(
         let preview = if book.format == Format::FictionBook {
             book.binaries
                 .get(reference.trim_start_matches('#'))
-                .map(|bytes| image_png(bytes, &reference))
+                .map(|bytes| image_png(bytes, cancel))
                 .transpose()?
         } else if let Some(path) = resolve(&chapter.href, &reference) {
             let path = path.split('#').next().unwrap_or(&path);
-            Some(archive_image(&book.path, path, cancel)?)
+            match archive_image(&book.path, path, cancel) {
+                Ok(png) => Some(png),
+                Err(error) => {
+                    cancel.check()?;
+                    log::warn!("Book illustration unavailable: {error:#}");
+                    None
+                }
+            }
         } else {
             None
         };
@@ -872,11 +879,15 @@ fn sanitize(node: Node<'_, '_>, output: &mut ChapterContent, depth: usize) -> Re
     }
     Ok(())
 }
-fn image_png(bytes: &[u8], _name: &str) -> Result<Vec<u8>> {
+fn image_png(bytes: &[u8], cancel: &crate::work::Cancellation) -> Result<Vec<u8>> {
     use std::io::Write;
     let mut file = tempfile::NamedTempFile::new()?;
     file.write_all(bytes)?;
-    crate::inline_images::thumbnail_png(file.path(), reader_limits::BOOK_PREVIEW_EDGE)
+    crate::inline_images::thumbnail_png_cancellable(
+        file.path(),
+        reader_limits::BOOK_PREVIEW_EDGE,
+        cancel,
+    )
 }
 fn archive_image(path: &Path, member: &str, cancel: &crate::work::Cancellation) -> Result<Vec<u8>> {
     let mut archive = archive(path)?;
@@ -1277,6 +1288,6 @@ mod tests {
             xml("<!DOCTYPE book [<!ENTITY a SYSTEM 'file:///secret'>]><book>&a;</book>").is_err()
         );
         assert!(decode(b"<!DOCTYPE book [<!ENTITY a SYSTEM 'file:///secret'>]><book/>").is_err());
-        assert!(image_png(&missing_image(), "missing.png").is_ok());
+        assert!(image_png(&missing_image(), &crate::work::Cancellation::default()).is_ok());
     }
 }

@@ -66,6 +66,7 @@ enum Renderer {
     Source(SourceReader),
     Paged {
         view: Entity<paged::PagedReader>,
+        html: Option<(Entity<native::NativeReader>, bool)>,
         editor: Option<Entity<gpui_kit::component::input::EditorState>>,
         dirty: std::rc::Rc<std::cell::Cell<bool>>,
         saving: std::rc::Rc<std::cell::Cell<bool>>,
@@ -270,6 +271,18 @@ impl Reader {
                     false,
                 )
             });
+        let html = path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
+            .then(|| {
+                let active = cx
+                    .try_global::<crate::app::ReaderPreferences>()
+                    .is_none_or(|prefs| prefs.html_preview);
+                (
+                    cx.new(|cx| native::NativeReader::html(path.clone(), None, active, window, cx)),
+                    active,
+                )
+            });
         let mut reader = Self {
             title: path.display().to_string().into(),
             path,
@@ -282,6 +295,7 @@ impl Reader {
             json: None,
             csv,
             renderer: Renderer::Paged {
+                html,
                 view,
                 editor,
                 dirty,
@@ -508,6 +522,13 @@ impl Reader {
         }
     }
     pub fn hide_native(&self, cx: &mut App) {
+        if let Renderer::Paged {
+            html: Some((view, _)),
+            ..
+        } = &self.renderer
+        {
+            view.read(cx).hide();
+        }
         if let Renderer::Markup(view) = &self.renderer {
             view.set_images_active(false, cx);
         }
@@ -520,6 +541,14 @@ impl Reader {
     }
 
     pub fn reveal_native(&self, cx: &mut App) -> bool {
+        if let Renderer::Paged {
+            html: Some((view, true)),
+            ..
+        } = &self.renderer
+        {
+            view.update(cx, |view, cx| view.open(cx));
+            return true;
+        }
         if let Renderer::Gif(view) = &self.renderer {
             view.update(cx, |view, cx| view.set_active(true, cx));
         }
@@ -601,6 +630,13 @@ impl Reader {
         if let Renderer::Paged { view, .. } = &self.renderer {
             self.snapshot = format!("paged:{}:{:?}", saved.total, saved.modified);
             view.update(cx, |page, cx| page.saved(text, saved, cx));
+            if let Renderer::Paged {
+                html: Some((browser, _)),
+                ..
+            } = &self.renderer
+            {
+                browser.update(cx, |browser, cx| browser.reload_html_file(cx));
+            }
         }
     }
     pub fn finish_page_save(&self) {
@@ -621,6 +657,13 @@ impl Reader {
             self.set_preview(*visible, cx);
         } else if old.json.as_ref().is_some_and(|(_, visible)| *visible) {
             self.set_preview(true, cx);
+        }
+        if let Renderer::Paged {
+            html: Some((_, visible)),
+            ..
+        } = &old.renderer
+        {
+            self.set_preview(*visible, cx);
         }
         match (&mut self.renderer, &old.renderer) {
             (Renderer::Source(s), Renderer::Source(o)) => s.inherit(o, cx),
@@ -743,6 +786,9 @@ impl Reader {
         }
     }
     pub fn preview_preference(&self) -> Option<&'static str> {
+        if matches!(&self.renderer, Renderer::Paged { html: Some(_), .. }) {
+            return Some("html");
+        }
         if self.is_csv() {
             return Some("csv");
         }
@@ -755,7 +801,12 @@ impl Reader {
         }
     }
     pub fn can_preview(&self) -> bool {
-        self.csv.is_some() || self.json.is_some() || matches!(self.renderer, Renderer::Markup(_))
+        self.csv.is_some()
+            || self.json.is_some()
+            || matches!(
+                self.renderer,
+                Renderer::Markup(_) | Renderer::Paged { html: Some(_), .. }
+            )
     }
     pub fn set_preview(&mut self, preview: bool, cx: &mut App) {
         if !preview && glim_services::diagnostics::failure(&self.path).is_some() {
@@ -767,6 +818,18 @@ impl Reader {
         {
             view.update(cx, |page, cx| page.request_save_before_preview(cx));
             return;
+        }
+        if let Renderer::Paged {
+            html: Some((browser, visible)),
+            ..
+        } = &mut self.renderer
+        {
+            *visible = preview;
+            if preview {
+                browser.update(cx, |browser, cx| browser.open(cx));
+            } else {
+                browser.read(cx).hide();
+            }
         }
         if self.csv.is_some() {
             let geo = self.geo_format();
@@ -828,6 +891,13 @@ impl Reader {
     pub fn toggle_label(&self) -> &'static str {
         if self.csv.as_ref().is_some_and(|(_, visible)| *visible)
             || self.json.as_ref().is_some_and(|(_, visible)| *visible)
+            || matches!(
+                &self.renderer,
+                Renderer::Paged {
+                    html: Some((_, true)),
+                    ..
+                }
+            )
             || matches!(&self.renderer, Renderer::Markup(m) if m.preview)
         {
             "Source"
@@ -847,6 +917,15 @@ impl Reader {
         }
     }
     pub fn reveal_anchor(&mut self, anchor: &str, cx: &mut App) {
+        if let Renderer::Paged {
+            html: Some((browser, _)),
+            ..
+        } = &self.renderer
+        {
+            browser.update(cx, |browser, _| browser.reveal_html_anchor(anchor));
+            self.set_preview(true, cx);
+            return;
+        }
         if let Renderer::Markup(m) = &mut self.renderer {
             m.sync_preview(cx);
             m.reveal(anchor, cx);
@@ -894,6 +973,13 @@ impl Reader {
             Renderer::XMind(v) => v.clone().into_any_element(),
             Renderer::Book(v, _) => v.clone().into_any_element(),
             Renderer::Native(n) => n.clone().into_any_element(),
+            Renderer::Paged {
+                html: Some((browser, true)),
+                ..
+            } => {
+                browser.update(cx, |browser, _| browser.set_html_open(open));
+                browser.clone().into_any_element()
+            }
             Renderer::Paged { view, .. } => view.clone().into_any_element(),
             Renderer::Unavailable(e) => e.render(cx),
         }

@@ -28,7 +28,7 @@ scripts/              打包、签名、更新清单与专项原生检查
 
 ## 阅读边界统一管理
 
-`assets/reader-limits.json` 是应用阅读阈值的唯一数值来源，按阅读器分类，注明类型、单位、超限效果和说明。`scripts/generate-reader-limits.py` 校验配置，在各 Cargo OUT_DIR 生成 Rust 常量、Swift ReaderLimits 和嵌入式 JSON。`glim-services::limits` 导出 Rust 值，应用展示层直接使用；原生预览编译生成的 Swift，私有图表 WebView 接收同一份值映射。构建跟踪配置及生成器变更，CI 路径过滤也覆盖两者，阅读器不在运行时读配置文件。见[自动生成清单](reader-limits.zh-CN.md)，用生成器的 `--docs` 更新。此次迁移保持既有阈值，流式改造和取消旧输入上限后续统一调整。
+`assets/reader-limits.json` 是应用阅读阈值的唯一数值来源，按阅读器分类，注明类型、单位、超限效果和说明。`scripts/generate-reader-limits.py` 校验配置，在各 Cargo OUT_DIR 生成 Rust 常量、Swift ReaderLimits 和嵌入式 JSON。`glim-services::limits` 导出 Rust 值，应用展示层直接使用；原生预览编译生成的 Swift，私有图表 WebView 接收同一份值映射。构建跟踪配置及生成器变更，CI 路径过滤也覆盖两者，阅读器不在运行时读配置文件。见[自动生成清单](reader-limits.zh-CN.md)，用生成器的 `--docs` 更新。非 Git 阅读器以流式、分页或完整源后备替代文件总量门槛；工作预算约束活动处理，不限制完整文件访问。Git/diff 留待专项迭代。
 
 ## 工作台与编辑
 
@@ -68,11 +68,11 @@ Mermaid、Graphviz、PlantUML、flowchart.js、WaveDrom 和 MathJax 及许可证
 
 `services/matroska` 在后台检查有界 EBML 结构，将 H.264／AAC-LC 样本无损重新封装为临时 MP4，交由 AVKit 播放。AVC 参数集来自轨道配置或 Annex-B 帧，MP4 合成偏移保留帧重排。`services/preview` 保留临时媒体并映射原始路径到播放路径，保持文件身份和显示名称。无需安装或启动 FFmpeg，支持范围及预算见[格式限制](file-format-support.zh-CN.md)。
 
-`services/preview::prepare` 在后台校验文件，准备播放列表、数据库快照和工作表 HTML。每个 `reader/native` 实体保留控制器及准备数据。系统框架加载通过主线程队列调度，不在 GPUI render/layout 中读取文件。切换隐藏视图并暂停媒体，保留当前页码／播放位置；关闭先释放原生资源，再清理临时数据。工具包浮层暂时隐藏原生视图，可访问性节点和 responder chain 动作接入主窗口。
+`services/preview::prepare` 在后台校验文件，准备播放列表、数据库快照和磁盘工作表索引。每个 `reader/native` 实体保留控制器及准备数据。系统框架加载通过主线程队列调度，不在 GPUI render/layout 中读取文件。切换隐藏视图并暂停媒体，保留当前页码／播放位置；关闭先释放原生资源，再清理临时数据。工具包浮层暂时隐藏原生视图，可访问性节点和 responder chain 动作接入主窗口。
 
-PDF 与 Office/iWork 保持只读。工作表服务使用 calamine 生成转义、禁用网络／脚本的 HTML，显示缓存公式值。字体仅查看，不安装。音频封面／元数据异步读取并可取消，装饰播放动效遵守减少动态效果设置，不代表真实频谱。
+PDF 与 Office/iWork 保持只读。`services/spreadsheet` 将 XLSX 关系、共享字符串及工作表 XML 流式写入临时 SQLite 索引，按工作表分页展示单元格地址、完整缓存值及公式；不复刻 Excel 网格排版，不重算公式。XLS 及不支持的结构使用 Quick Look。字体仅查看，不安装。音频封面／元数据异步读取并可取消，装饰播放动效遵守减少动态效果设置，不代表真实频谱。
 
-`services/sqlite` 复制有界数据库／WAL／journal 并检查源状态，副本重建 SHM。原生 SQLite 在串行后台队列执行生成的只读查询，禁用扩展加载，不 checkpoint 或写入源文件。缺少主库的 sidecar 仅显示有界信息。
+`services/sqlite` 流式复制数据库／WAL／journal 并检查源状态，副本重建 SHM。原生 SQLite 在串行后台队列执行生成的只读查询，禁用扩展加载，不 checkpoint 或写入源文件。缺少主库的 sidecar 仅显示有界信息。
 
 `native/PreviewMain.swift` 只用于独立的默认文件类型设置辅助程序。明确选择并确认后才修改 Launch Services 处理程序，记录旧处理程序；恢复时不覆盖用户之后的修改。
 
@@ -103,7 +103,7 @@ macOS 的 `macos-updater` feature 通过 `app/updater_bridge` 接入 `native/Upd
 
 ## Markdown 网络图片
 
-`app/image_http` 提供仅支持 GET 的 GPUI 图片传输，网络与解码通过 `services/markup_images` 在后台执行。网络请求总时限 20 秒，最多五次重定向，响应上限 16 MiB；使用系统 curl，SVG 使用系统字体并禁用外部引用，失败时显示占位图。GitHub 仓库的 `blob`／`raw` 图片地址转换为原始文件地址；常规 ref/file 地址在原始域名失败时回退到 GitHub Contents API 的原始媒体响应，两个请求共用时限。未认证的 API 回退受 GitHub 请求频率限制，不改变原文或普通链接的目的地。
+`app/image_http` 提供仅支持 GET 的 GPUI 图片传输，网络与解码通过 `services/markup_images` 在后台执行。网络使用共享超时、重定向及最低传输速度策略；响应流式写入临时文件，不设总下载大小门槛；使用系统 curl，SVG 使用系统字体并禁用外部引用，失败时显示占位图。GitHub 仓库的 `blob`／`raw` 图片地址转换为原始文件地址；常规 ref/file 地址在原始域名失败时回退到 GitHub Contents API 的原始媒体响应，两个请求共用时限。未认证的 API 回退受 GitHub 请求频率限制，不改变原文或普通链接的目的地。
 
 `reader/pictures` 在后台解析真实图片引用，忽略代码示例，按主题选择 `<picture>` 候选，并为每个解析后的 `.gif` 地址（本地或 HTTP）保留一个逐帧播放器，重复引用共享。图片解析回调始终使用自定义 GPUI 图片源，包括初次加载期间，避免误走整段 GIF 缓存。删除引用会释放播放器，隐藏标签和源码模式取消播放任务并释放解码缓冲，只保留 GIF 压缩数据；返回时未完成动画重新播放，已完成的有限循环 GIF 保留最后一帧像素；渲染中不执行网络或文件 I/O。
 
@@ -132,10 +132,14 @@ ImageIO 图片预览等待嵌入视图挂载且滚动视口尺寸有效后才执
 
 `reader/markup` 为 HTML 保留 `NativeReader`，同时保留普通源码编辑、保存和阅读模式偏好。以源码模式打开时，直到请求预览才初始化 WebKit；切回预览使用当前编辑器快照。`native/HTMLPreview.swift` 持有 WKWebView，负责 CSS/JavaScript、页内锚点和加载／错误提示。使用非持久化网站数据存储隔离预览状态。本地链接经原生桥返回 Glim 已有的文件／URL 导航，不会在源码标签不变时悄悄换成另一份文档。弹窗遮挡和切换标签时隐藏原生视图。
 
-私有 `glim-html` URL scheme 提供编辑器快照，不在用户项目目录生成临时 HTML。本地资源由可取消的串行后台读取器按共享 IO 缓冲预算分块加载；解析符号链接后的资源路径必须位于所属 Git 项目内；未找到 Git 根目录时沿用文档目录。根目录在资源后台线程查找并缓存，同项目中通过 `../` 引用的同级目录样式和脚本可正常加载，不阻塞原生布局。网络资源交由 WebKit。该 scheme 与普通 HTTP 源不同，需要后端、安全源 API、浏览器扩展或任意文件系统访问的页面，可能仍需开发服务器或完整浏览器。已进入源码分页的大 HTML 保留原有源码访问。这一路径独立于 Markdown 的静态内联 HTML 和隔离的离线图表渲染。
+私有 `glim-html` URL scheme 提供编辑器快照，不在用户项目目录生成临时 HTML。本地资源由可取消的串行后台读取器按共享 IO 缓冲预算分块加载；解析符号链接后的资源路径必须位于所属 Git 项目内；未找到 Git 根目录时沿用文档目录。根目录在资源后台线程查找并缓存，同项目中通过 `../` 引用的同级目录样式和脚本可正常加载，不阻塞原生布局。网络资源交由 WebKit。该 scheme 与普通 HTTP 源不同，需要后端、安全源 API、浏览器扩展或任意文件系统访问的页面，可能仍需开发服务器或完整浏览器。大 HTML 由同一资源后台线程流式读取原文件，不构造完整编辑器快照；保留可编辑源分页，修改当前页后须先保存再返回预览。WebKit 仍自行管理 DOM 和脚本内存。这一路径独立于 Markdown 的静态内联 HTML 和隔离的离线图表渲染。
 
 ## 诊断日志与文件故障隔离
 
 `glim-services::diagnostics` 在 `~/Library/Logs/Glim/` 中通过有界后台队列写日志，按本地日期归档，单个文件达到 8 MiB 前滚动，最多保留 14 个日志文件（包含当天分段），启动及滚动时清理旧文件。普通日志不阻塞绘制；panic 请求落盘并等待最多两秒确认。记录启动版本、文件打开/读取/读者初始化、标签切换、保存及工具包 Info/Warn/Error 信息；panic 额外记录所属文件完整路径、阶段、线程、源码位置和强制捕获的堆栈，不记录文件正文。普通队列满时可能丢弃诊断事件。
 
 `reader::boundary` 为文件子树的延迟布局、预绘制及绘制标记文件上下文，panic hook 在当前进程中隔离故障路径。固定版本 `gpui-pre` 0.3.8 的本地补丁（`vendor/gpui-pre/GLIM-PATCH.md`）在进入 macOS 回调边界前捕获已确认的文件绘制 panic，恢复实体借用、更新层级和布局引擎，丢弃未完成帧及绘制栈并强制重绘。故障文件显示完整路径、重试及打开日志按钮，其他标签及未保存的编辑实体继续保留。文件读取和读者构造的 unwind 转换为文件错误。仅显式重试，重启后解除隔离。abort 模式 panic、内存耗尽、栈溢出、原生异常及非文件应用 panic 不属于该 unwind 边界。
+
+### 非 Git 阅读器的可扩展处理
+
+`services/geo` 流式分页读取 GPX/KML；`services/xml` 为地理及 XLSX 阅读统一处理 XML 字符引用。`services/paged` 管理可编辑 UTF-8 分页和可取消的原子区间替换，刷新保留当前页及未变的编辑状态。`services/streamed` 在取消后重建解码器，并使用有界滚动缓存。大型单元格和结构文本通过字节窗口或磁盘源分页访问。图表分批渲染；书籍复杂章节保留导航并提供完整文本／十六进制资源分页。图片串行解码，在解码内存预算内缩放栅格，保留逻辑尺寸和完整源字节；这不是真正的原分辨率分块解码。SDK 临时分配、ZIP 中央目录索引和 SQLite 表达式计算仍受平台／库实现约束。Git/diff 优化另行处理。

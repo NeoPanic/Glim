@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 import CoreServices
 import CoreText
 
-struct Playlist: Decodable { let files: [String]; let shuffle: Bool; let autoplay: Bool?; let playbackFiles: [String: String]?; let matroskaFiles: [String]?; let mediaHelper: String?; let mediaDirectory: String?; let mediaErrors: [String: String]?; let office: Bool?; let image: Bool?; let imagePath: String?; let imageWidth: Double?; let imageHeight: Double?; let associations: String?; let font: Bool?; let sqlite: String?; let sqliteInfo: String?; let spreadsheet: String?; let htmlContent: String?; let language: String?; let localizations: [String: String]? }
+struct Playlist: Decodable { let files: [String]; let shuffle: Bool; let autoplay: Bool?; let playbackFiles: [String: String]?; let matroskaFiles: [String]?; let mediaHelper: String?; let mediaDirectory: String?; let mediaErrors: [String: String]?; let office: Bool?; let image: Bool?; let imagePath: String?; let imageWidth: Double?; let imageHeight: Double?; let associations: String?; let font: Bool?; let sqlite: String?; let sqliteInfo: String?; let spreadsheet: String?; let htmlContent: String?; let htmlFile: Bool?; let language: String?; let localizations: [String: String]? }
 
 var nativeTranslations: [String: String] = [:]
 func L(_ text: String) -> String { nativeTranslations[text] ?? text }
@@ -487,8 +487,8 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         if playlist.shuffle { urls.shuffle() }
         guard !urls.isEmpty else { throw NSError(domain: "Glim", code: 1, userInfo: [NSLocalizedDescriptionKey: "No media files found."]) }
         pdf = urls.count == 1 && urls[0].pathExtension.lowercased() == "pdf"
-        if let html = playlist.htmlContent {
-            let preview = HTMLPreview(document: urls[0], contents: html); htmlPreview = preview
+        if playlist.htmlContent != nil || playlist.htmlFile == true {
+            let preview = HTMLPreview(document: urls[0], contents: playlist.htmlContent); htmlPreview = preview
             preview.view.frame = host.bounds; preview.view.autoresizingMask = [.width, .height]
             host.addSubview(preview.view)
             if let anchor = htmlAnchor { preview.reveal(anchor) }

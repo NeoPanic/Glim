@@ -87,7 +87,7 @@ impl MarkupReader {
             cx.new(|cx| {
                 super::native::NativeReader::html(
                     path.to_path_buf(),
-                    text.to_owned(),
+                    Some(text.to_owned()),
                     preview,
                     window,
                     cx,

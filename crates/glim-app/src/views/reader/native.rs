@@ -23,6 +23,7 @@ pub(super) struct NativeReader {
     raw: Option<Entity<super::paged::PagedReader>>,
     loading_bytes: bool,
     html: Option<String>,
+    html_file: bool,
     html_open: Option<super::OpenLink>,
     html_anchor: Option<String>,
     _html_navigation: Option<Task<()>>,
@@ -30,7 +31,7 @@ pub(super) struct NativeReader {
 impl NativeReader {
     pub fn html(
         path: PathBuf,
-        text: String,
+        text: Option<String>,
         active: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -47,7 +48,8 @@ impl NativeReader {
             obscured: false,
             raw: None,
             loading_bytes: false,
-            html: Some(text),
+            html_file: text.is_none(),
+            html: text,
             html_open: None,
             html_anchor: None,
             _html_navigation: None,
@@ -88,12 +90,18 @@ impl NativeReader {
     }
     fn load_html(&mut self) {
         let configuration = serde_json::json!({
-            "files": [&self.path], "shuffle": false, "htmlContent": &self.html,
+            "files": [&self.path], "shuffle": false, "htmlContent": &self.html, "htmlFile": self.html_file,
             "language": glim_services::locale::code(), "localizations": glim_services::locale::translations(),
         });
         self.preview = Some(super::native_bridge::NativePreview::new(
             &serde_json::to_vec(&configuration).expect("HTML preview configuration"),
         ));
+    }
+    pub fn reload_html_file(&mut self, cx: &mut Context<Self>) {
+        if self.html_file && self.preview.is_some() {
+            self.load_html();
+            cx.notify();
+        }
     }
     pub fn update_html(&mut self, text: String, cx: &mut Context<Self>) {
         if self.html.as_deref() == Some(text.as_str()) {
@@ -172,6 +180,7 @@ impl NativeReader {
             raw: None,
             loading_bytes: false,
             html: None,
+            html_file: false,
             html_open: None,
             html_anchor: None,
             _html_navigation: None,
@@ -180,7 +189,7 @@ impl NativeReader {
         view
     }
     pub(super) fn open(&mut self, cx: &mut Context<Self>) {
-        if self.html.is_some() {
+        if self.html.is_some() || self.html_file {
             if self.preview.is_none() {
                 self.load_html();
                 cx.notify();
@@ -269,8 +278,10 @@ impl Render for NativeReader {
                 .child(div().flex_1().min_h_0().w_full().child(raw))
                 .into_any_element();
         }
-        let bytes_available =
-            self.html.is_none() && !self.folder && !glim_services::preview::is_iwork(&self.path);
+        let bytes_available = self.html.is_none()
+            && !self.html_file
+            && !self.folder
+            && !glim_services::preview::is_iwork(&self.path);
         if self.preview.is_some() {
             let view = cx.entity();
             let surface = canvas(

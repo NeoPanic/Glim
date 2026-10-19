@@ -7,15 +7,15 @@ import UniformTypeIdentifiers
 private final class HTMLResources: NSObject, WKURLSchemeHandler {
     let document: URL
     private let directory: URL
-    private let contents: Data
+    private let contents: Data?
     // Accessed only by the serial resource worker.
     private var readDirectory: URL?
     private let worker = DispatchQueue(label: "glim.html.resources", qos: .userInitiated)
     private var active: [ObjectIdentifier: WKURLSchemeTask] = [:]
-    init(document: URL, contents: String) {
+    init(document: URL, contents: String?) {
         self.document = document
         directory = document.deletingLastPathComponent()
-        self.contents = Data(contents.utf8)
+        self.contents = contents.map { Data($0.utf8) }
     }
     private func resourceDirectory() -> URL {
         if let directory = readDirectory { return directory }
@@ -44,12 +44,12 @@ private final class HTMLResources: NSObject, WKURLSchemeHandler {
                 let mainDocument = path.path == self.document.standardizedFileURL.path
                 let file: FileHandle?
                 let length: Int
-                if mainDocument {
-                    file = nil; length = self.contents.count
+                if mainDocument, let contents = self.contents {
+                    file = nil; length = contents.count
                 } else {
                     let resolved = path.resolvingSymlinksInPath()
                     let root = self.resourceDirectory().path
-                    guard resolved.path.hasPrefix(root.hasSuffix("/") ? root : root + "/") else {
+                    guard mainDocument || resolved.path.hasPrefix(root.hasSuffix("/") ? root : root + "/") else {
                         throw URLError(.noPermissionsToReadFile)
                     }
                     file = try FileHandle(forReadingFrom: resolved)
@@ -73,8 +73,9 @@ private final class HTMLResources: NSObject, WKURLSchemeHandler {
                     if let file = file {
                         data = try file.read(upToCount: ReaderLimits.IO_BUFFER_BYTES) ?? Data()
                     } else {
-                        let end = min(self.contents.count, offset + ReaderLimits.IO_BUFFER_BYTES)
-                        data = self.contents.subdata(in: offset..<end); offset = end
+                        let contents = self.contents ?? Data()
+                        let end = min(contents.count, offset + ReaderLimits.IO_BUFFER_BYTES)
+                        data = contents.subdata(in: offset..<end); offset = end
                     }
                     if data.isEmpty { break }
                     // Deliver one chunk at a time so queued callbacks cannot retain
@@ -103,7 +104,7 @@ final class HTMLPreview: NSObject, WKNavigationDelegate {
     private var loaded = false
     private var anchor: String?
     var pendingNavigation: String?
-    init(document: URL, contents: String) {
+    init(document: URL, contents: String?) {
         self.document = document.standardizedFileURL
         var components = URLComponents()
         components.scheme = "glim-html"; components.host = "local"; components.path = document.path
