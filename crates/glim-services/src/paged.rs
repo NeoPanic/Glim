@@ -188,7 +188,9 @@ fn read_source_cancellable(
         PAGE_BYTES
     };
     let mut bytes = Vec::new();
-    (&mut file).take(limit).read_to_end(&mut bytes)?;
+    (&mut file)
+        .take(limit.min(total - start))
+        .read_to_end(&mut bytes)?;
     let (text, end) = if source.binary {
         use std::fmt::Write;
         let mut text = String::new();
