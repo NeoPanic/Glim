@@ -20,6 +20,8 @@ pub(super) struct NativeReader {
     prepared: Option<glim_services::preview::PreparedPreview>,
     error: Option<String>,
     obscured: bool,
+    raw: Option<Entity<super::paged::PagedReader>>,
+    loading_bytes: bool,
     html: Option<String>,
     html_open: Option<super::OpenLink>,
     html_anchor: Option<String>,
@@ -43,6 +45,8 @@ impl NativeReader {
             prepared: None,
             error: None,
             obscured: false,
+            raw: None,
+            loading_bytes: false,
             html: Some(text),
             html_open: None,
             html_anchor: None,
@@ -108,6 +112,32 @@ impl NativeReader {
         self.html_anchor = Some(anchor.to_owned());
     }
 
+    fn open_bytes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.task.is_some() || self.folder {
+            return;
+        }
+        self.hide();
+        self.loading_bytes = true;
+        let path = self.path.clone();
+        let work = cx
+            .background_executor()
+            .spawn(async move { glim_services::paged::read_binary_page(&path, 0) });
+        self.task = Some(cx.spawn_in(window, async move |view, cx| {
+            let result = work.await;
+            let _ = view.update_in(cx, |view, _, cx| {
+                view.task = None;
+                view.loading_bytes = false;
+                match result {
+                    Ok(page) => {
+                        view.raw = Some(cx.new(|_| super::paged::PagedReader::readonly(page)))
+                    }
+                    Err(error) => view.error = Some(format!("{error:#}")),
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
     pub fn image_stamp(&self) -> Option<(u64, Option<std::time::SystemTime>)> {
         self.prepared
             .as_ref()
@@ -139,6 +169,8 @@ impl NativeReader {
             prepared: None,
             error: None,
             obscured: false,
+            raw: None,
+            loading_bytes: false,
             html: None,
             html_open: None,
             html_anchor: None,
@@ -218,9 +250,30 @@ impl Render for NativeReader {
             return div().size_full().into_any_element();
         }
 
+        if self.loading_bytes {
+            return super::preview_loading(cx);
+        }
+        if let Some(raw) = self.raw.clone() {
+            return v_flex()
+                .size_full()
+                .min_h_0()
+                .child(
+                    Button::new("native-return-preview")
+                        .ghost()
+                        .label(glim_services::locale::tr("Preview"))
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            view.raw = None;
+                            cx.notify();
+                        })),
+                )
+                .child(div().flex_1().min_h_0().w_full().child(raw))
+                .into_any_element();
+        }
+        let bytes_available =
+            self.html.is_none() && !self.folder && !glim_services::preview::is_iwork(&self.path);
         if self.preview.is_some() {
             let view = cx.entity();
-            return canvas(
+            let surface = canvas(
                 move |bounds, window, cx| {
                     if let Some(preview) = &view.read(cx).preview {
                         preview.layout(bounds, window);
@@ -228,8 +281,46 @@ impl Render for NativeReader {
                 },
                 |_, _, _, _| {},
             )
-            .size_full()
-            .into_any_element();
+            .size_full();
+            return v_flex()
+                .size_full()
+                .min_h_0()
+                .child(div().flex_1().min_h_0().w_full().child(surface))
+                .when(bytes_available, |view| {
+                    let original = self.path.clone();
+                    view.child(
+                        gpui_kit::component::h_flex()
+                            .px_2()
+                            .gap_2()
+                            .child(
+                                Button::new("native-file-bytes")
+                                    .ghost()
+                                    .label(glim_services::locale::tr("File bytes"))
+                                    .on_click(cx.listener(|view, _, window, cx| {
+                                        view.open_bytes(window, cx)
+                                    })),
+                            )
+                            .when(
+                                self.prepared
+                                    .as_ref()
+                                    .is_some_and(|prepared| prepared.is_spreadsheet()),
+                                |row| {
+                                    row.child(
+                                        Button::new("spreadsheet-original")
+                                            .ghost()
+                                            .label(glim_services::locale::tr("Open in Default App"))
+                                            .on_click(move |_, _, cx| {
+                                                if let Ok(url) = url::Url::from_file_path(&original)
+                                                {
+                                                    cx.open_url(url.as_str());
+                                                }
+                                            }),
+                                    )
+                                },
+                            ),
+                    )
+                })
+                .into_any_element();
         }
         v_flex()
             .size_full()
@@ -257,6 +348,14 @@ impl Render for NativeReader {
                             .label(glim_services::locale::tr("Retry"))
                             .on_click(cx.listener(|v, _, _, cx| v.open(cx))),
                     )
+            })
+            .when(bytes_available && self.error.is_some(), |view| {
+                view.child(
+                    Button::new("failed-native-file-bytes")
+                        .ghost()
+                        .label(glim_services::locale::tr("File bytes"))
+                        .on_click(cx.listener(|view, _, window, cx| view.open_bytes(window, cx))),
+                )
             })
             .into_any_element()
     }

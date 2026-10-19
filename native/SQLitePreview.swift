@@ -202,28 +202,60 @@ final class SQLitePreview: NSObject, NSTableViewDataSource, NSTableViewDelegate 
             } catch { fail(error.localizedDescription) }
         }
     }
-    private func displayText(_ title: String, _ content: String) {
-        let alert = NSAlert(); alert.messageText = title
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 560, height: 320)); scroll.hasVerticalScroller = true
-        let text = NSTextView(frame: scroll.bounds); text.isEditable = false
-        text.font = .monospacedSystemFont(ofSize: 12, weight: .regular); text.string = content
-        scroll.documentView = text; alert.accessoryView = scroll
-        alert.addButton(withTitle: L("Close")); alert.runModal()
+    // The value dialog reads a bounded byte window, independent of value length.
+    private func valuePage(_ title: String, source: String, start: Int = 0, history: [Int] = []) {
+        busy = true; controls()
+        queue.async { [self] in
+            do {
+                let result = try query("SELECT typeof(value),length(CAST(value AS BLOB)),hex(substr(CAST(value AS BLOB),\(start + 1),\(ReaderLimits.TEXT_PAGE_BYTES + 3))) FROM (\(source))", limit: 1, textLimit: nil)
+                guard let row = result.rows.first, row.count == 3 else { throw failure() }
+                let binary = row[0] == "blob"
+                let total = Int(row[1]) ?? 0
+                let encoded = Array(row[2].utf8)
+                var bytes = Data(); bytes.reserveCapacity(encoded.count / 2)
+                func nibble(_ byte: UInt8) -> UInt8 { byte <= 57 ? byte - 48 : byte - 55 }
+                for index in stride(from: 0, to: encoded.count - encoded.count % 2, by: 2) {
+                    bytes.append(nibble(encoded[index]) << 4 | nibble(encoded[index + 1]))
+                }
+                var length = min(bytes.count, ReaderLimits.TEXT_PAGE_BYTES)
+                var content = ""
+                if binary { content = bytes.prefix(length).map { String(format: "%02X", $0) }.joined(separator: " ") }
+                else if row[0] == "null" { content = "NULL" }
+                else {
+                    // Keep UTF-8 code points together at page boundaries.
+                    var complete = String(data: bytes.prefix(length), encoding: .utf8)
+                    for _ in 0..<3 where complete == nil && length > 0 {
+                        length -= 1; complete = String(data: bytes.prefix(length), encoding: .utf8)
+                    }
+                    content = complete ?? String(decoding: bytes.prefix(length), as: UTF8.self)
+                }
+                let end = start + length
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, !self.closed else { return }
+                    self.busy = false; self.controls()
+                    let alert = NSAlert(); alert.messageText = title
+                    alert.informativeText = "bytes \(start)–\(end) / \(total)"
+                    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 560, height: 320)); scroll.hasVerticalScroller = true
+                    let text = NSTextView(frame: scroll.bounds); text.isEditable = false
+                    text.font = .monospacedSystemFont(ofSize: 12, weight: .regular); text.string = content
+                    scroll.documentView = text; alert.accessoryView = scroll
+                    alert.addButton(withTitle: L("Close"))
+                    alert.addButton(withTitle: L("Previous")).isEnabled = !history.isEmpty
+                    alert.addButton(withTitle: L("Next page")).isEnabled = end < total && end > start
+                    let response = alert.runModal()
+                    if response == .alertSecondButtonReturn, let previous = history.last {
+                        self.valuePage(title, source: source, start: previous, history: Array(history.dropLast()))
+                    } else if response == .alertThirdButtonReturn, end < total && end > start {
+                        self.valuePage(title, source: source, start: end, history: history + [start])
+                    }
+                }
+            } catch { fail(error.localizedDescription) }
+        }
     }
     @objc func showSQL() {
         guard !busy, tables.indices.contains(picker.indexOfSelectedItem) else { return }
         let name = tables[picker.indexOfSelectedItem].name.replacingOccurrences(of: "'", with: "''")
-        busy = true; controls()
-        queue.async { [self] in
-            do {
-                let result = try query("SELECT sql FROM sqlite_master WHERE name='\(name)'", limit: 1, textLimit: nil)
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self, !self.closed else { return }
-                    self.busy = false; self.controls()
-                    self.displayText(L("Table / View Definition"), result.rows.first?.first ?? "")
-                }
-            } catch { fail(error.localizedDescription) }
-        }
+        valuePage(L("Table / View Definition"), source: "SELECT sql AS value FROM sqlite_master WHERE name='\(name)'")
     }
     @objc private func showFullValue() {
         guard !busy, structure.state == .off, grid.clickedRow >= 0, grid.clickedColumn >= 0,
@@ -231,18 +263,7 @@ final class SQLitePreview: NSObject, NSTableViewDataSource, NSTableViewDelegate 
         let name = tables[picker.indexOfSelectedItem].name.replacingOccurrences(of: "\"", with: "\"\"")
         let column = grid.tableColumns[grid.clickedColumn].title.replacingOccurrences(of: "\"", with: "\"\"")
         let row = offset + grid.clickedRow
-        let order = rowOrder
-        busy = true; controls()
-        queue.async { [self] in
-            do {
-                let result = try query("SELECT CASE WHEN typeof(\"\(column)\")='blob' THEN hex(\"\(column)\") ELSE CAST(\"\(column)\" AS TEXT) END FROM (SELECT * FROM \"\(name)\"\(order) LIMIT 1 OFFSET \(row))", limit: 1, textLimit: nil)
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self, !self.closed else { return }
-                    self.busy = false; self.controls()
-                    self.displayText(L("Full cell value"), result.rows.first?.first ?? "NULL")
-                }
-            } catch { fail(error.localizedDescription) }
-        }
+        valuePage(L("Full cell value"), source: "SELECT \"\(column)\" AS value FROM (SELECT * FROM \"\(name)\"\(rowOrder) LIMIT 1 OFFSET \(row))")
     }
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {

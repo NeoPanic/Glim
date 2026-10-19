@@ -16,6 +16,8 @@ use std::{path::PathBuf, sync::Arc};
 enum Source {
     Text(Arc<String>),
     File(PathBuf),
+    GeoText(Arc<String>),
+    GeoFile(PathBuf),
 }
 pub(super) struct CsvTable {
     source: Option<Source>,
@@ -52,6 +54,21 @@ impl CsvTable {
     }
     pub fn from_file(path: PathBuf, delimiter: u8) -> Self {
         let mut table = Self::new();
+        let geo = path.extension().is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("gpx") || extension.eq_ignore_ascii_case("kml")
+        });
+        if geo {
+            table.format = if path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("gpx"))
+            {
+                "GPX"
+            } else {
+                "KML"
+            };
+            table.source = Some(Source::GeoFile(path));
+            return table;
+        }
         table.source = Some(Source::File(path));
         table.delimiter = delimiter;
         table.format = if delimiter == b'\t' { "TSV" } else { "CSV" };
@@ -64,6 +81,14 @@ impl CsvTable {
         self.source = Some(Source::Text(Arc::new(text)));
         self.delimiter = delimiter;
         self.format = if delimiter == b'\t' { "TSV" } else { "CSV" };
+        self.reload(cx);
+    }
+    pub fn load_geo(&mut self, text: String, format: &'static str, cx: &mut Context<Self>) {
+        if matches!(&self.source, Some(Source::GeoText(old)) if old.as_str() == text) {
+            return;
+        }
+        self.source = Some(Source::GeoText(Arc::new(text)));
+        self.format = format;
         self.reload(cx);
     }
     pub fn reload(&mut self, cx: &mut Context<Self>) {
@@ -84,6 +109,12 @@ impl CsvTable {
         let (cancel, guard) = glim_services::work::Cancellation::task();
         let work = cx.background_executor().spawn(async move {
             match source {
+                Source::GeoText(text) => {
+                    glim_services::geo::read_page(text.as_bytes(), row, &cancel)
+                }
+                Source::GeoFile(path) => {
+                    glim_services::geo::read_page(std::fs::File::open(path)?, row, &cancel)
+                }
                 Source::Text(text) => {
                     glim_services::csv::read_page(text.as_bytes(), delimiter, row, column, &cancel)
                 }
@@ -141,6 +172,7 @@ impl Render for CsvTable {
             .saturating_sub(self.column_start)
             .min(reader_limits::CSV_COLUMNS);
         let width = 64. + columns as f32 * 200.;
+        let geographic = matches!(self.format, "GPX" | "KML");
         let horizontal = self.horizontal_scroll.clone();
         let vertical = self.scroll.0.borrow().base_handle.clone();
         let view = cx.entity().downgrade();
@@ -202,7 +234,9 @@ impl Render for CsvTable {
             .child(div().id("csv-horizontal").flex_1().min_h_0().overflow_x_scroll().track_scroll(&self.horizontal_scroll).child(
                 v_flex().w(px(width)).h_full()
                     .child(h_flex().h(px(32.)).child(div().w(px(64.)).child(glim_services::locale::tr("Row")))
-                        .children((0..columns).map(|column| div().w(px(200.)).px_3().child((self.column_start + column + 1).to_string()))))
+                        .children((0..columns).map(|column| div().w(px(200.)).px_3().child(if geographic {
+                            glim_services::locale::tr(match column { 0 => "Longitude", 1 => "Latitude", _ => "Altitude" })
+                        } else { (self.column_start + column + 1).to_string() }))))
                     .child(uniform_list("csv-rows", self.rows.len(), cx.processor(move |view, range: std::ops::Range<usize>, _, cx| {
                         range.map(|row| {
                             h_flex().h(px(32.)).w_full().overflow_hidden().border_b_1().border_color(cx.theme().border)

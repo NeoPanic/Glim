@@ -12,7 +12,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const ARCHIVE_LIMIT: u64 = reader_limits::BOOK_INPUT_BYTES;
 const TEXT_LIMIT: u64 = reader_limits::BOOK_TEXT_BYTES;
 const CHAPTER_LIMIT: u64 = reader_limits::BOOK_CHAPTER_BYTES;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,12 +51,14 @@ pub struct Book {
     pub toc: Vec<TocEntry>,
     pub cover: Option<String>,
     binaries: HashMap<String, Vec<u8>>,
+    source_pages: bool,
 }
 pub struct ChapterContent {
     pub html: String,
     pub images: HashMap<String, Vec<u8>>,
     pub anchors: HashMap<String, Range<usize>>,
     pub comic: Option<Vec<u8>>,
+    pub page: Option<crate::paged::TextPage>,
 }
 pub fn supports(path: &Path) -> bool {
     path.file_name().and_then(|v| v.to_str()).is_some_and(|v| {
@@ -71,52 +72,52 @@ pub fn supports(path: &Path) -> bool {
 fn bounded(reader: impl Read, limit: u64) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     reader.take(limit + 1).read_to_end(&mut bytes)?;
-    ensure!(
+    reader_limits::preview_budget(
         bytes.len() as u64 <= limit,
-        "Ebook content exceeds reading limit"
-    );
+        "Ebook content exceeds reading limit",
+    )?;
     Ok(bytes)
 }
 fn archive(path: &Path) -> Result<zip::ZipArchive<std::fs::File>> {
-    ensure!(
-        std::fs::metadata(path)?.len() <= ARCHIVE_LIMIT,
-        "Ebook exceeds the preview input size limit"
-    );
     let archive = zip::ZipArchive::new(std::fs::File::open(path)?)
         .context("Damaged or encrypted ebook archive")?;
-    ensure!(
-        archive.len() <= reader_limits::BOOK_ARCHIVE_ENTRIES,
-        "Ebook archive has too many entries"
-    );
     Ok(archive)
 }
 fn entry(archive: &mut zip::ZipArchive<std::fs::File>, name: &str, limit: u64) -> Result<Vec<u8>> {
     let file = archive
         .by_name(name)
         .with_context(|| format!("Missing ebook resource: {name}"))?;
-    ensure!(file.size() <= limit, "Ebook resource exceeds reading limit");
+    reader_limits::preview_budget(file.size() <= limit, "Ebook resource exceeds reading limit")?;
     ensure!(
         file.unix_mode().is_none_or(|v| v & 0o170000 != 0o120000),
         "Ebook resources cannot be symbolic links"
     );
     bounded(file, limit)
 }
-fn decode(bytes: &[u8]) -> Result<String> {
-    let encoding = if let Some((encoding, _)) = encoding_rs::Encoding::for_bom(bytes) {
+fn xml_encoding(bytes: &[u8]) -> &'static encoding_rs::Encoding {
+    if let Some((encoding, _)) = encoding_rs::Encoding::for_bom(bytes) {
         encoding
+    } else if bytes.starts_with(&[0, b'<', 0, b'?']) {
+        encoding_rs::UTF_16BE
+    } else if bytes.starts_with(&[b'<', 0, b'?', 0]) {
+        encoding_rs::UTF_16LE
     } else {
-        let head = String::from_utf8_lossy(&bytes[..bytes.len().min(256)]);
-        let label = head.split("encoding=").nth(1).and_then(|s| {
-            let quote = s.chars().next()?;
-            if !matches!(quote, '\'' | '"') {
-                return None;
-            }
-            s.get(1..)?.split(quote).next()
-        });
-        label
-            .and_then(|s| encoding_rs::Encoding::for_label(s.as_bytes()))
-            .unwrap_or(encoding_rs::UTF_8)
-    };
+        if !bytes.starts_with(b"<?xml") {
+            return encoding_rs::UTF_8;
+        }
+        let end = bytes
+            .windows(2)
+            .position(|pair| pair == b"?>")
+            .map_or(bytes.len(), |index| index + 2);
+        let mut probe = EncodingProbe::default();
+        for byte in &bytes[..end] {
+            probe.push(*byte);
+        }
+        probe.encoding.unwrap_or(encoding_rs::UTF_8)
+    }
+}
+fn decode(bytes: &[u8]) -> Result<String> {
+    let encoding = xml_encoding(bytes);
     let (text, _, errors) = encoding.decode(bytes);
     ensure!(!errors, "Ebook text encoding is invalid");
     let mut text = text.into_owned();
@@ -148,15 +149,20 @@ fn xml(text: &str) -> Result<Document<'_>> {
         !text.contains("<!DOCTYPE"),
         "Ebook XML document types and external entities are unsupported"
     );
-    Document::parse_with_options(
+    let parsed = Document::parse_with_options(
         text,
         roxmltree::ParsingOptions {
             allow_dtd: false,
             nodes_limit: reader_limits::BOOK_XML_NODES,
             ..Default::default()
         },
-    )
-    .context("Invalid ebook XML")
+    );
+    match parsed {
+        Err(roxmltree::Error::NodesLimitReached) => {
+            Err(reader_limits::PreviewBudgetExceeded("Chapter XML working budget exceeded").into())
+        }
+        result => result.context("Invalid ebook XML"),
+    }
 }
 fn named<'a, 'input>(node: Node<'a, 'input>, name: &str) -> impl Iterator<Item = Node<'a, 'input>> {
     let name = name.to_owned();
@@ -235,14 +241,22 @@ pub fn resolve(base: &str, href: &str) -> Option<String> {
     Some(result)
 }
 pub fn read(path: &Path) -> Result<Book> {
-    ensure!(
-        std::fs::metadata(path)?.len() <= ARCHIVE_LIMIT,
-        "Ebook exceeds the preview input size limit"
-    );
+    read_cancellable(path, &crate::work::Cancellation::default())
+}
+pub fn read_cancellable(path: &Path, cancel: &crate::work::Cancellation) -> Result<Book> {
+    match read_structured(path, cancel) {
+        Err(error) if error.is::<reader_limits::PreviewBudgetExceeded>() => {
+            source_book(path, cancel)
+        }
+        result => result,
+    }
+}
+fn read_structured(path: &Path, cancel: &crate::work::Cancellation) -> Result<Book> {
     let mut file = std::fs::File::open(path)?;
     let mut hash = Sha256::new();
-    let mut buffer = [0; 64 * 1024];
+    let mut buffer = vec![0; reader_limits::IO_BUFFER_BYTES];
     loop {
+        cancel.check()?;
         let count = file.read(&mut buffer)?;
         if count == 0 {
             break;
@@ -283,14 +297,8 @@ pub fn read(path: &Path) -> Result<Book> {
             .into_owned();
     }
     ensure!(
-        !book.chapters.is_empty() && book.chapters.len() <= reader_limits::BOOK_CHAPTERS,
+        !book.chapters.is_empty(),
         "Ebook requires chapters or comic pages within the preview count limit"
-    );
-    ensure!(
-        book.title.len() <= reader_limits::BOOK_METADATA_BYTES
-            && book.author.len() <= reader_limits::BOOK_METADATA_BYTES
-            && book.toc.len() <= reader_limits::BOOK_TOC_ENTRIES,
-        "Ebook metadata exceeds reading limit"
     );
     Ok(book)
 }
@@ -305,6 +313,7 @@ fn empty(path: &Path, format: Format) -> Result<Book> {
         toc: Vec::new(),
         cover: None,
         binaries: HashMap::new(),
+        source_pages: false,
     })
 }
 fn epub(path: &Path) -> Result<Book> {
@@ -408,7 +417,7 @@ fn epub(path: &Path) -> Result<Book> {
                     book.toc.push(TocEntry {
                         title: text(link),
                         href,
-                        depth: depth.min(reader_limits::BOOK_TOC_DEPTH),
+                        depth: depth,
                     });
                 }
             }
@@ -438,7 +447,7 @@ fn epub(path: &Path) -> Result<Book> {
                 book.toc.push(TocEntry {
                     title: label,
                     href,
-                    depth: depth.min(reader_limits::BOOK_TOC_DEPTH),
+                    depth: depth,
                 });
             }
         }
@@ -575,10 +584,10 @@ fn fictionbook(path: &Path, body: &str) -> Result<Book> {
             .decode(encoded)
             .context("Invalid FB2 embedded image")?;
         total += bytes.len();
-        ensure!(
+        reader_limits::preview_budget(
             total as u64 <= TEXT_LIMIT,
-            "FB2 images exceed reading limit"
-        );
+            "FB2 images exceed reading limit",
+        )?;
         book.binaries.insert(id.into(), bytes);
     }
     for body in named(doc.root(), "body") {
@@ -597,10 +606,10 @@ fn fictionbook(path: &Path, body: &str) -> Result<Book> {
             for node in section.children() {
                 serialize_fb2(node, &mut html, 0)?;
             }
-            ensure!(
+            reader_limits::preview_budget(
                 html.len() as u64 <= CHAPTER_LIMIT,
-                "FB2 chapter exceeds reading limit"
-            );
+                "FB2 chapter exceeds reading limit",
+            )?;
             book.chapters.push(Chapter {
                 href: href.clone(),
                 title: title.clone(),
@@ -623,10 +632,10 @@ fn escape(value: &str) -> String {
         .replace('"', "&quot;")
 }
 fn serialize_fb2(node: Node<'_, '_>, out: &mut String, depth: usize) -> Result<()> {
-    ensure!(
+    reader_limits::preview_budget(
         depth <= reader_limits::BOOK_FB2_DEPTH,
-        "FB2 nesting exceeds reading limit"
-    );
+        "FB2 nesting exceeds reading limit",
+    )?;
     if node.is_text() {
         out.push_str(&escape(node.text().unwrap_or_default()));
         return Ok(());
@@ -666,26 +675,45 @@ fn serialize_fb2(node: Node<'_, '_>, out: &mut String, depth: usize) -> Result<(
         serialize_fb2(child, out, depth + 1)?;
     }
     out.push_str(&format!("</{tag}>"));
-    ensure!(
+    reader_limits::preview_budget(
         out.len() as u64 <= CHAPTER_LIMIT,
-        "FB2 chapter exceeds reading limit"
-    );
+        "FB2 chapter exceeds reading limit",
+    )?;
     Ok(())
 }
 pub fn chapter(book: &Book, index: usize) -> Result<ChapterContent> {
+    chapter_cancellable(book, index, &crate::work::Cancellation::default())
+}
+pub fn chapter_cancellable(
+    book: &Book,
+    index: usize,
+    cancel: &crate::work::Cancellation,
+) -> Result<ChapterContent> {
+    cancel.check()?;
+    if book.source_pages {
+        return source_chapter(book, index, cancel);
+    }
+    match chapter_structured(book, index, cancel) {
+        Err(error) if error.is::<reader_limits::PreviewBudgetExceeded>() => {
+            source_chapter(book, index, cancel)
+        }
+        result => result,
+    }
+}
+fn chapter_structured(
+    book: &Book,
+    index: usize,
+    cancel: &crate::work::Cancellation,
+) -> Result<ChapterContent> {
     let chapter = book.chapters.get(index).context("Unknown ebook chapter")?;
     if book.format == Format::Comic {
-        let mut package = archive(&book.path)?;
-        let bytes = entry(
-            &mut package,
-            &chapter.href,
-            reader_limits::BOOK_RESOURCE_BYTES,
-        )?;
+        let png = archive_image(&book.path, &chapter.href, cancel)?;
         return Ok(ChapterContent {
             html: String::new(),
             images: HashMap::new(),
             anchors: HashMap::new(),
-            comic: Some(image_png(&bytes, &chapter.href)?),
+            comic: Some(png),
+            page: None,
         });
     }
     let raw = if let Some(html) = &chapter.html {
@@ -706,60 +734,48 @@ pub fn chapter(book: &Book, index: usize) -> Result<ChapterContent> {
         images: HashMap::new(),
         anchors: HashMap::new(),
         comic: None,
+        page: None,
     };
     sanitize(body, &mut output, 0)?;
-    let mut package = if book.format == Format::Epub {
-        Some(archive(&book.path)?)
-    } else {
-        None
-    };
     let refs = output.images.keys().cloned().collect::<Vec<_>>();
-    let mut total = 0;
     let mut decoded_total = 0;
     let mut preview_total = 0;
     for reference in refs {
-        let image = if book.format == Format::FictionBook {
+        cancel.check()?;
+        let preview = if book.format == Format::FictionBook {
             book.binaries
                 .get(reference.trim_start_matches('#'))
-                .cloned()
+                .map(|bytes| image_png(bytes, &reference))
+                .transpose()?
         } else if let Some(path) = resolve(&chapter.href, &reference) {
             let path = path.split('#').next().unwrap_or(&path);
-            package
-                .as_mut()
-                .and_then(|p| entry(p, path, reader_limits::BOOK_RESOURCE_BYTES).ok())
+            Some(archive_image(&book.path, path, cancel)?)
         } else {
             None
         };
-        if let Some(image) = image {
-            total += image.len();
-            ensure!(
-                total as u64 <= TEXT_LIMIT,
-                "Chapter images exceed reading limit"
-            );
-            if let Ok(png) = image_png(&image, &reference) {
-                use image::ImageDecoder;
-                let decoder =
-                    image::ImageReader::with_format(Cursor::new(&png), image::ImageFormat::Png)
-                        .into_decoder()?;
-                decoded_total += decoder.total_bytes();
-                drop(decoder);
-                preview_total += png.len();
-                ensure!(
-                    decoded_total <= reader_limits::BOOK_CHAPTER_DECODED_BYTES
-                        && preview_total as u64 <= TEXT_LIMIT,
-                    "Chapter illustrations exceed decoded memory limit"
-                );
-                output.images.insert(reference, png);
-            }
+        if let Some(png) = preview {
+            use image::ImageDecoder;
+            let decoder =
+                image::ImageReader::with_format(Cursor::new(&png), image::ImageFormat::Png)
+                    .into_decoder()?;
+            decoded_total += decoder.total_bytes();
+            drop(decoder);
+            preview_total += png.len();
+            reader_limits::preview_budget(
+                decoded_total <= reader_limits::BOOK_CHAPTER_DECODED_BYTES
+                    && preview_total as u64 <= TEXT_LIMIT,
+                "Chapter illustrations exceed decoded memory limit",
+            )?;
+            output.images.insert(reference, png);
         }
     }
     Ok(output)
 }
 fn sanitize(node: Node<'_, '_>, output: &mut ChapterContent, depth: usize) -> Result<()> {
-    ensure!(
+    reader_limits::preview_budget(
         depth <= reader_limits::BOOK_HTML_DEPTH && output.html.len() as u64 <= CHAPTER_LIMIT,
-        "Chapter rendering exceeds reading limit"
-    );
+        "Chapter rendering exceeds reading limit",
+    )?;
     if node.is_text() {
         output
             .html
@@ -836,10 +852,10 @@ fn sanitize(node: Node<'_, '_>, output: &mut ChapterContent, depth: usize) -> Re
     if tag == "img"
         && let Some(src) = attribute(node, "src").or_else(|| attribute(node, "href"))
     {
-        ensure!(
+        reader_limits::preview_budget(
             output.images.len() < reader_limits::BOOK_CHAPTER_IMAGES,
-            "Chapter contains too many images"
-        );
+            "Chapter image working budget exceeded",
+        )?;
         output.images.insert(src.into(), Vec::new());
         output.html.push_str(&format!(" src=\"{}\"", escape(src)));
         if let Some(alt) = node.attribute("alt") {
@@ -856,43 +872,267 @@ fn sanitize(node: Node<'_, '_>, output: &mut ChapterContent, depth: usize) -> Re
     }
     Ok(())
 }
-fn image_png(bytes: &[u8], name: &str) -> Result<Vec<u8>> {
-    if name.to_ascii_lowercase().ends_with(".svg") {
-        let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default())?;
-        let size = tree.size();
-        let scale =
-            (reader_limits::BOOK_PREVIEW_EDGE as f32 / size.width().max(size.height())).min(1.);
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(
-            (size.width() * scale).ceil().max(1.) as u32,
-            (size.height() * scale).ceil().max(1.) as u32,
-        )
-        .context("Invalid book illustration")?;
-        resvg::render(
-            &tree,
-            resvg::tiny_skia::Transform::from_scale(scale, scale),
-            &mut pixmap.as_mut(),
-        );
-        return Ok(pixmap.encode_png()?);
+fn image_png(bytes: &[u8], _name: &str) -> Result<Vec<u8>> {
+    use std::io::Write;
+    let mut file = tempfile::NamedTempFile::new()?;
+    file.write_all(bytes)?;
+    crate::inline_images::thumbnail_png(file.path(), reader_limits::BOOK_PREVIEW_EDGE)
+}
+fn archive_image(path: &Path, member: &str, cancel: &crate::work::Cancellation) -> Result<Vec<u8>> {
+    let mut archive = archive(path)?;
+    let entry = archive.by_name(member)?;
+    let mut file = tempfile::NamedTempFile::new()?;
+    cancel.copy(entry, file.as_file_mut())?;
+    crate::inline_images::thumbnail_png_cancellable(
+        file.path(),
+        reader_limits::BOOK_PREVIEW_EDGE,
+        cancel,
+    )
+}
+fn source_book(path: &Path, cancel: &crate::work::Cancellation) -> Result<Book> {
+    let zipped = !path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("fb2"));
+    let fiction = path.file_name().is_some_and(|name| {
+        name.to_string_lossy()
+            .to_ascii_lowercase()
+            .ends_with(".fb2.zip")
+    }) || !zipped;
+    let mut book = empty(
+        path,
+        if fiction {
+            Format::FictionBook
+        } else {
+            Format::Epub
+        },
+    )?;
+    book.title = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    book.fingerprint = format!("ebook-source:{}", std::path::absolute(path)?.display());
+    book.source_pages = true;
+    if zipped {
+        let mut package = archive(path)?;
+        for index in 0..package.len() {
+            cancel.check()?;
+            let entry = package.by_index(index)?;
+            let name = entry.name();
+            if !entry.is_dir() {
+                book.chapters.push(Chapter {
+                    href: name.to_owned(),
+                    title: name.to_owned(),
+                    html: None,
+                });
+            }
+        }
+    } else {
+        book.chapters.push(Chapter {
+            href: String::new(),
+            title: book.title.clone(),
+            html: None,
+        });
     }
-    let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
-    let mut limits = image::Limits::default();
-    limits.max_alloc = Some(reader_limits::BOOK_IMAGE_DECODED_BYTES);
-    limits.max_image_width = Some(reader_limits::BOOK_IMAGE_EDGE);
-    limits.max_image_height = Some(reader_limits::BOOK_IMAGE_EDGE);
-    reader.limits(limits);
-    let decoder = reader.into_decoder()?;
-    use image::ImageDecoder;
     ensure!(
-        decoder.total_bytes() <= reader_limits::BOOK_IMAGE_DECODED_BYTES,
-        "Book illustration exceeds decoded memory limit"
+        !book.chapters.is_empty(),
+        "Ebook contains no readable chapter source"
     );
-    let image = image::DynamicImage::from_decoder(decoder)?.thumbnail(
-        reader_limits::BOOK_PREVIEW_EDGE,
-        reader_limits::BOOK_PREVIEW_EDGE,
+    book.toc = book
+        .chapters
+        .iter()
+        .map(|c| TocEntry {
+            href: c.href.clone(),
+            title: c.title.clone(),
+            depth: 0,
+        })
+        .collect();
+    Ok(book)
+}
+fn source_chapter(
+    book: &Book,
+    index: usize,
+    cancel: &crate::work::Cancellation,
+) -> Result<ChapterContent> {
+    let chapter = book.chapters.get(index).context("Unknown ebook chapter")?;
+    let page = if book
+        .path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("fb2"))
+    {
+        transcode_source(std::fs::File::open(&book.path)?, &book.path, cancel)?
+    } else {
+        if book.source_pages
+            && !matches!(
+                chapter
+                    .href
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "htm" | "html" | "xhtml" | "xml" | "opf" | "ncx" | "fb2"
+            )
+        {
+            return Ok(ChapterContent {
+                html: String::new(),
+                images: HashMap::new(),
+                anchors: HashMap::new(),
+                comic: None,
+                page: Some(crate::paged::zip_member_bytes(
+                    &book.path,
+                    &chapter.href,
+                    cancel,
+                )?),
+            });
+        }
+        let mut package = archive(&book.path)?;
+        let mut entry = package.by_name(&chapter.href)?;
+        let mut prefix = Vec::new();
+        (&mut entry).take(256).read_to_end(&mut prefix)?;
+        let complete_declaration =
+            !prefix.starts_with(b"<?xml") || prefix.windows(2).any(|pair| pair == b"?>");
+        if complete_declaration && xml_encoding(&prefix) == encoding_rs::UTF_8 {
+            drop(entry);
+            drop(package);
+            crate::paged::zip_member(&book.path, &chapter.href, cancel)?
+        } else {
+            transcode_source(
+                std::io::Cursor::new(prefix).chain(entry),
+                &book.path,
+                cancel,
+            )?
+        }
+    };
+    Ok(ChapterContent {
+        html: String::new(),
+        images: HashMap::new(),
+        anchors: HashMap::new(),
+        comic: None,
+        page: Some(page),
+    })
+}
+
+fn transcode_source(
+    mut input: impl Read,
+    path: &Path,
+    cancel: &crate::work::Cancellation,
+) -> Result<crate::paged::TextPage> {
+    use std::io::{BufReader, BufWriter, Write};
+    let mut prefix = Vec::new();
+    (&mut input).take(8).read_to_end(&mut prefix)?;
+    let declaration = prefix.starts_with(b"<?xml");
+    let mut encoding = xml_encoding(&prefix);
+    let mut input = BufReader::with_capacity(
+        reader_limits::IO_BUFFER_BYTES,
+        std::io::Cursor::new(prefix).chain(input),
     );
-    let mut output = Cursor::new(Vec::new());
-    image.write_to(&mut output, image::ImageFormat::Png)?;
-    Ok(output.into_inner())
+    let mut file = tempfile::NamedTempFile::new()?;
+    let mut writer = BufWriter::with_capacity(reader_limits::IO_BUFFER_BYTES, file.as_file_mut());
+    if declaration {
+        // XML declarations are ASCII, even for legacy single-byte encodings.
+        // Stream arbitrary declaration whitespace without retaining a prefix cap.
+        let mut probe = EncodingProbe::default();
+        let mut previous = 0;
+        let mut position = 0;
+        loop {
+            if position % reader_limits::IO_BUFFER_BYTES == 0 {
+                cancel.check()?;
+            }
+            let mut byte = [0];
+            input
+                .read_exact(&mut byte)
+                .context("Truncated XML declaration")?;
+            probe.push(byte[0]);
+            writer.write_all(&byte)?;
+            position += 1;
+            if previous == b'?' && byte[0] == b'>' {
+                break;
+            }
+            previous = byte[0];
+        }
+        if let Some(detected) = probe.encoding {
+            encoding = detected;
+        }
+    }
+    if encoding == encoding_rs::UTF_8
+        && path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("fb2"))
+    {
+        writer.flush()?;
+        drop(writer);
+        return crate::paged::read_page(path, 0, false);
+    }
+    let mut decoder = encoding.new_decoder_with_bom_removal();
+    let mut buffer = vec![0; reader_limits::IO_BUFFER_BYTES];
+    let mut output = vec![0; reader_limits::IO_BUFFER_BYTES];
+    loop {
+        cancel.check()?;
+        let count = input.read(&mut buffer)?;
+        let mut consumed = 0;
+        loop {
+            let (result, read, written, errors) =
+                decoder.decode_to_utf8(&buffer[consumed..count], &mut output, count == 0);
+            ensure!(!errors, "Ebook text encoding is invalid");
+            consumed += read;
+            writer.write_all(&output[..written])?;
+            if result == encoding_rs::CoderResult::InputEmpty {
+                break;
+            }
+            cancel.check()?;
+        }
+        if count == 0 {
+            break;
+        }
+    }
+    writer.flush()?;
+    drop(writer);
+    crate::paged::generated(path, file)
+}
+#[derive(Default)]
+struct EncodingProbe {
+    state: usize,
+    matched: usize,
+    quote: u8,
+    label: Vec<u8>,
+    encoding: Option<&'static encoding_rs::Encoding>,
+}
+impl EncodingProbe {
+    fn push(&mut self, byte: u8) {
+        match self.state {
+            0 => {
+                let key = b"encoding";
+                self.matched = if byte == key[self.matched] {
+                    self.matched + 1
+                } else {
+                    usize::from(byte == key[0])
+                };
+                if self.matched == key.len() {
+                    self.state = 1;
+                    self.matched = 0;
+                }
+            }
+            1 if byte.is_ascii_whitespace() => {}
+            1 if byte == b'=' => self.state = 2,
+            2 if byte.is_ascii_whitespace() => {}
+            2 if matches!(byte, b'\'' | b'"') => {
+                self.quote = byte;
+                self.state = 3;
+            }
+            3 if byte == self.quote => {
+                self.encoding = encoding_rs::Encoding::for_label(&self.label);
+                self.state = 4;
+            }
+            3 => {
+                if self.label.len() < reader_limits::IO_BUFFER_BYTES {
+                    self.label.push(byte);
+                }
+            }
+            4 => {}
+            _ => self.state = 0,
+        }
+    }
 }
 
 /// A memory-only missing-resource fallback; never resolve unknown illustration URLs.

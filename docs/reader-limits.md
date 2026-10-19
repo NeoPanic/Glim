@@ -10,287 +10,288 @@ This page is generated from the same policy. After editing it, run `python3 scri
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `text.editable_bytes` | 32 MiB | bytes | fallback | Large/long-line text switches to editable pages; saving streams unchanged ranges through an atomic replacement without a total file-size cap. |
-| `text.editable_newlines` | 400,000 | items | fallback | Large/long-line text switches to editable pages; saving streams unchanged ranges through an atomic replacement without a total file-size cap. |
-| `text.line_bytes` | 64 KiB | bytes | fallback | Large/long-line text switches to editable pages; saving streams unchanged ranges through an atomic replacement without a total file-size cap. |
-| `text.page_bytes` | 1 MiB | bytes | budget | text: page bytes |
-| `text.full_bytes` | 256 MiB | bytes | budget | Maximum bytes in an expanded read-only page, independent of total file size. |
-| `text.full_newlines` | 4,000,000 | items | budget | Maximum newlines in an expanded page; remaining text stays available on the next page. |
+| `text.editable_bytes` | 32 MiB | bytes | fallback | In-memory editor working budget; larger/long-line documents use editable pages and streaming atomic saves, without a file-size rejection. |
+| `text.editable_newlines` | 400,000 | items | fallback | In-memory editor working budget; larger/long-line documents use editable pages and streaming atomic saves, without a file-size rejection. |
+| `text.line_bytes` | 64 KiB | bytes | fallback | In-memory editor working budget; larger/long-line documents use editable pages and streaming atomic saves, without a file-size rejection. |
+| `text.page_bytes` | 1 MiB | bytes | budget | Bytes per normal text page; following pages preserve the rest of the file. |
+| `text.full_bytes` | 256 MiB | bytes | budget | Expanded-page working budget, not a full-file gate; previous/next controls keep the rest accessible. Editable and streamed sources also retain their own working budgets. |
+| `text.full_newlines` | 4,000,000 | items | budget | Expanded-page working budget, not a full-file gate; previous/next controls keep the rest accessible. Editable and streamed sources also retain their own working budgets. |
+| `text.layout_run_bytes` | 1 KiB | bytes | budget | Maximum text run per virtual read-only row; long logical lines wrap into further rows without losing source bytes. |
 
 ## binary
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `binary.preview_bytes` | 256 KiB | bytes | page | Bytes read per hex page; previous/next navigation exposes the complete file. |
+| `binary.preview_bytes` | 256 KiB | bytes | page | Bytes per hex page; previous/next controls expose the complete file. |
 
 ## image
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `image.input_bytes` | None | bytes | unlimited | File-backed native image loading or streamed thumbnail preparation; source size and pixel count do not reject the file. |
-| `image.pixels` | None | pixels | unlimited | File-backed native image loading or streamed thumbnail preparation; source size and pixel count do not reject the file. |
-| `image.decoded_bytes` | 512 MiB | bytes | budget | Active scanline/encoder working budget for QOI conversion; native image decoding loads one requested page. |
-| `image.preview_edge` | 4,000 | pixels | budget | Initial ImageIO preview resolution. Original resolution loads explicitly for the current page, with pan/zoom. |
+| `image.input_bytes` | None | bytes | unlimited | File-backed native image loading has no application input-byte or total-pixel gate; File bytes preserves complete source access. |
+| `image.pixels` | None | pixels | unlimited | File-backed native image loading has no application input-byte or total-pixel gate; File bytes preserves complete source access. |
+| `image.decoded_bytes` | 512 MiB | bytes | budget | Active native/QOI preview raster working memory. QOI samples pixels while streaming instead of rejecting wide source scanlines; actual-size mode may use a scaled raster and complete original file bytes remain accessible. |
+| `image.preview_edge` | 4,000 | pixels | budget | Initial ImageIO thumbnail resolution. Actual-size mode may increase the raster within image.decoded_bytes; it never rejects a file based on original dimensions. |
 
 ## gif
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `gif.preview_edge` | 2,048 | pixels | budget | Displayed animation texture size, independent of source size and frame count. |
-| `gif.canvas_bytes` | 512 MiB | bytes | budget | Compositing working memory. Oversized canvases are sampled while decoding rows, rather than rejecting the animation. |
-| `gif.batch_bytes` | 16 MiB | bytes | budget | gif: batch bytes |
-| `gif.batch_frames` | 3 | items | budget | gif: batch frames |
+| `gif.preview_edge` | 2,048 | pixels | budget | Displayed animation texture edge, independent of source size and frame count. |
+| `gif.canvas_bytes` | 512 MiB | bytes | budget | Compositing working memory; oversized source canvases are sampled while decoding rows instead of rejecting the animation. |
+| `gif.batch_bytes` | 16 MiB | bytes | budget | Per-batch animation prefetch budget; consumed frames are released and later frames remain available. |
+| `gif.batch_frames` | 3 | items | budget | Per-batch animation prefetch budget; consumed frames are released and later frames remain available. |
 
 ## tiff
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `tiff.decode_buffer_bytes` | None | bytes | unlimited | Native ImageIO loads the requested TIFF page on demand; page count and aggregate decoded/encoded preview totals do not gate opening. |
-| `tiff.pages` | None | items | unlimited | Native ImageIO loads the requested TIFF page on demand; page count and aggregate decoded/encoded preview totals do not gate opening. |
-| `tiff.preview_decoded_bytes` | None | bytes | unlimited | Native ImageIO loads the requested TIFF page on demand; page count and aggregate decoded/encoded preview totals do not gate opening. |
-| `tiff.preview_encoded_bytes` | None | bytes | unlimited | Native ImageIO loads the requested TIFF page on demand; page count and aggregate decoded/encoded preview totals do not gate opening. |
+| `tiff.decode_buffer_bytes` | None | bytes | unlimited | ImageIO loads the requested TIFF page on demand, with no application page-count or aggregate-preview total gate. |
+| `tiff.pages` | None | items | unlimited | ImageIO loads the requested TIFF page on demand, with no application page-count or aggregate-preview total gate. |
+| `tiff.preview_decoded_bytes` | None | bytes | unlimited | ImageIO loads the requested TIFF page on demand, with no application page-count or aggregate-preview total gate. |
+| `tiff.preview_encoded_bytes` | None | bytes | unlimited | ImageIO loads the requested TIFF page on demand, with no application page-count or aggregate-preview total gate. |
 
 ## inline_image
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `inline_image.preview_edge` | 2,048 | pixels | budget | Inline thumbnail resolution; complete source images remain available in their standalone reader. |
-| `inline_image.encoded_bytes` | None | bytes | unlimited | File-backed native image loading or streamed thumbnail preparation; source size and pixel count do not reject the file. |
-| `inline_image.decoded_bytes` | 64 MiB | bytes | budget | inline image: decoded bytes |
-| `inline_image.output_overhead_bytes` | 1 MiB | bytes | budget | inline image: output overhead bytes |
+| `inline_image.preview_edge` | 2,048 | pixels | budget | Inline thumbnail resolution/decoded/output working budget; the original remains available through its standalone reader or source URL. |
+| `inline_image.encoded_bytes` | None | bytes | unlimited | File-backed or streamed image preparation has no application encoded-file-size gate. |
+| `inline_image.decoded_bytes` | 64 MiB | bytes | budget | Inline thumbnail resolution/decoded/output working budget; the original remains available through its standalone reader or source URL. |
+| `inline_image.output_overhead_bytes` | 1 MiB | bytes | budget | Inline thumbnail resolution/decoded/output working budget; the original remains available through its standalone reader or source URL. |
 
 ## font
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `font.input_bytes` | None | bytes | unlimited | System font metadata is loaded from the file; all faces and sample text remain accessible. |
-| `font.faces` | None | items | unlimited | System font metadata is loaded from the file; all faces and sample text remain accessible. |
-| `font.resource_types` | None | items | unlimited | System font metadata is loaded from the file; all faces and sample text remain accessible. |
-| `font.sample_chars` | None | characters | unlimited | System font metadata is loaded from the file; all faces and sample text remain accessible. |
+| `font.input_bytes` | None | bytes | unlimited | System file-backed font metadata retains all faces, resources and sample text without application total gates. |
+| `font.faces` | None | items | unlimited | System file-backed font metadata retains all faces, resources and sample text without application total gates. |
+| `font.resource_types` | None | items | unlimited | System file-backed font metadata retains all faces, resources and sample text without application total gates. |
+| `font.sample_chars` | None | characters | unlimited | System file-backed font metadata retains all faces, resources and sample text without application total gates. |
 
 ## playlist
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `playlist.files` | None | items | unlimited | Playlist rows are virtualized; no application total-file-count gate. |
+| `playlist.files` | None | items | unlimited | Virtualized playlist rows retain every eligible file; no application file-count gate. |
 
 ## mkv
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `mkv.playlist_bytes` | None | bytes | unlimited | Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate. |
-| `mkv.input_bytes` | None | bytes | unlimited | Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate. |
-| `mkv.frame_bytes` | 16 MiB | bytes | budget | Active compressed frame/codec-metadata allocation budget, independent of the movie size. |
-| `mkv.frames` | None | items | unlimited | Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate. |
-| `mkv.parser_read_bytes` | 2 GiB | bytes | budget | Per-progress parser allowance, reset after each frame; optional seek indexes are skipped without loading them. Not a cumulative movie-length limit. |
-| `mkv.parser_operations` | 20,000,000 | operations | budget | Per-progress parser allowance, reset after each frame; optional seek indexes are skipped without loading them. Not a cumulative movie-length limit. |
-| `mkv.tracks` | None | items | unlimited | Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate. |
-| `mkv.duration_seconds` | None | seconds | unlimited | Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate. |
-| `mkv.nal_units` | None | items | unlimited | Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate. |
-| `mkv.nesting` | 16 | levels | budget | Parser stack budget for track metadata; optional chapters/tags/cues are skipped in a streaming pass. |
-| `mkv.elements` | None | items | unlimited | Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate. |
+| `mkv.playlist_bytes` | None | bytes | unlimited | Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate. |
+| `mkv.input_bytes` | None | bytes | unlimited | Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate. |
+| `mkv.frame_bytes` | 16 MiB | bytes | budget | One active compressed-frame/codec-metadata allocation budget, independent of movie size; original file bytes remain accessible. |
+| `mkv.frames` | None | items | unlimited | Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate. |
+| `mkv.parser_read_bytes` | 2 GiB | bytes | budget | Parser work allowance resets after each frame, not cumulatively across the movie; optional seek metadata is skipped in a streaming pass. |
+| `mkv.parser_operations` | 20,000,000 | operations | budget | Parser work allowance resets after each frame, not cumulatively across the movie; optional seek metadata is skipped in a streaming pass. |
+| `mkv.tracks` | None | items | unlimited | Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate. |
+| `mkv.duration_seconds` | None | seconds | unlimited | Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate. |
+| `mkv.nal_units` | None | items | unlimited | Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate. |
+| `mkv.nesting` | 16 | levels | budget | Track-metadata parser stack budget; optional chapters/tags/cues are skipped, and file-byte inspection remains available. |
+| `mkv.elements` | None | items | unlimited | Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate. |
 
 ## json
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `json.input_bytes` | 16 MiB | bytes | fallback | Structured-tree working budget. Complete content remains accessible and editable in Source, using pages for large files. |
-| `json.field_chars` | 512 | characters | budget | Tree-label summary only. Expand containers or double-click a field to inspect the complete key/value; Source preserves full content. |
-| `json.nodes` | 250,000 | items | fallback | Structured-tree working budget. Complete content remains accessible and editable in Source, using pages for large files. |
-| `json.description_chars` | 80 | characters | budget | Tree-label summary only. Expand containers or double-click a field to inspect the complete key/value; Source preserves full content. |
-| `json.array_summary_chars` | 120 | characters | budget | Tree-label summary only. Expand containers or double-click a field to inspect the complete key/value; Source preserves full content. |
-| `json.auto_expand_children` | 16 | items | budget | json: auto expand children |
+| `json.input_bytes` | 16 MiB | bytes | fallback | Structured-tree working budget; Source retains the complete editable document, with pages for large files. |
+| `json.field_chars` | 512 | characters | budget | Tree-label summary only; expand containers or double-click to inspect the complete key/value. Source retains all content. |
+| `json.nodes` | 250,000 | items | fallback | Structured-tree working budget; Source retains the complete editable document, with pages for large files. |
+| `json.description_chars` | 80 | characters | budget | Tree-label summary only; expand containers or double-click to inspect the complete key/value. Source retains all content. |
+| `json.array_summary_chars` | 120 | characters | budget | Tree-label summary only; expand containers or double-click to inspect the complete key/value. Source retains all content. |
+| `json.auto_expand_children` | 16 | items | budget | Initial auto-expansion policy only; collapsed children can still be expanded explicitly. |
 
 ## csv
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `csv.input_bytes` | 16 MiB | bytes | budget | Active page and individual record decoding budget; not a total file-size gate. Oversized individual records remain accessible in the editable Source pages. |
-| `csv.rows` | 100,000 | items | page | Active table page/window budget. Row and column navigation expose the remaining records. |
-| `csv.columns` | 256 | items | page | Active table page/window budget. Row and column navigation expose the remaining records. |
-| `csv.cells` | 1,000,000 | items | page | Active table page/window budget. Row and column navigation expose the remaining records. |
-| `csv.cell_chars` | 4,096 | characters | budget | Visible cell excerpt; double-click displays the complete current cell in a selectable read-only editor. |
+| `csv.input_bytes` | 16 MiB | bytes | budget | Active page/record decoding memory, not a total-file gate. Oversized individual records remain accessible in editable Source pages. |
+| `csv.rows` | 100,000 | items | page | Active table page/window size; row and column navigation exposes the remaining records. |
+| `csv.columns` | 256 | items | page | Active table page/window size; row and column navigation exposes the remaining records. |
+| `csv.cells` | 1,000,000 | items | page | Active table page/window size; row and column navigation exposes the remaining records. |
+| `csv.cell_chars` | 4,096 | characters | budget | Visible single-line cell excerpt; double-click retains the complete value and uses paged viewing for large values. |
 
 ## spreadsheet
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `spreadsheet.sheets` | 128 | items | truncate | spreadsheet: sheets |
-| `spreadsheet.rows` | 5,000 | items | truncate | spreadsheet: rows |
-| `spreadsheet.columns` | 256 | items | truncate | spreadsheet: columns |
-| `spreadsheet.cell_chars` | 4,096 | characters | truncate | spreadsheet: cell chars |
-| `spreadsheet.input_bytes` | 128 MiB | bytes | reject | spreadsheet: input bytes |
-| `spreadsheet.sheet_text_bytes` | 32 MiB | bytes | budget | spreadsheet: sheet text bytes |
-| `spreadsheet.html_bytes` | 64 MiB | bytes | budget | spreadsheet: html bytes |
+| `spreadsheet.sheets` | None | items | unlimited | XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap. |
+| `spreadsheet.rows` | None | items | unlimited | XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap. |
+| `spreadsheet.columns` | None | items | unlimited | XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap. |
+| `spreadsheet.cell_chars` | None | characters | unlimited | XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap. |
+| `spreadsheet.input_bytes` | None | bytes | unlimited | XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap. |
+| `spreadsheet.sheet_text_bytes` | None | bytes | unlimited | XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap. |
+| `spreadsheet.html_bytes` | None | bytes | unlimited | XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap. |
 
 ## xmind
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `xmind.title_bytes` | 16 KiB | bytes | fallback | Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages. |
-| `xmind.nesting` | 64 | levels | fallback | Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages. |
-| `xmind.content_bytes` | 16 MiB | bytes | fallback | Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages. |
-| `xmind.topics` | 10,000 | items | fallback | Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages. |
+| `xmind.title_bytes` | 16 KiB | bytes | fallback | Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression. |
+| `xmind.nesting` | 64 | levels | fallback | Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression. |
+| `xmind.content_bytes` | 16 MiB | bytes | fallback | Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression. |
+| `xmind.topics` | 10,000 | items | fallback | Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression. |
 | `xmind.input_bytes` | None | bytes | unlimited | Open the ZIP container from disk without a total file-size or entry-count gate. |
 | `xmind.archive_entries` | None | items | unlimited | Open the ZIP container from disk without a total file-size or entry-count gate. |
-| `xmind.sheets` | 100 | items | fallback | Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages. |
-| `xmind.relationships` | 10,000 | items | fallback | Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages. |
-| `xmind.note_bytes` | 64 KiB | bytes | fallback | Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages. |
-| `xmind.labels` | 128 | items | fallback | Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages. |
-| `xmind.xml_nodes` | 200,000 | items | fallback | Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages. |
-| `xmind.xml_nesting` | 256 | levels | fallback | Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages. |
-| `xmind.link_bytes` | 16 KiB | bytes | fallback | Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages. |
-| `xmind.labels_bytes` | 16 KiB | bytes | fallback | Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages. |
+| `xmind.sheets` | 100 | items | fallback | Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression. |
+| `xmind.relationships` | 10,000 | items | fallback | Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression. |
+| `xmind.note_bytes` | 64 KiB | bytes | fallback | Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression. |
+| `xmind.labels` | 128 | items | fallback | Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression. |
+| `xmind.xml_nodes` | 200,000 | items | fallback | Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression. |
+| `xmind.xml_nesting` | 256 | levels | fallback | Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression. |
+| `xmind.link_bytes` | 16 KiB | bytes | fallback | Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression. |
+| `xmind.labels_bytes` | 16 KiB | bytes | fallback | Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression. |
 
 ## archive
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `archive.entries` | None | items | unlimited | Enumerate and spool every entry to disk; the UI reads bounded pages. |
-| `archive.bytes` | 32 MiB | bytes | budget | Small-document XML parsing buffer; larger content is streamed in full to a paged text view. |
+| `archive.entries` | None | items | unlimited | Enumerate all entries and spool the report for bounded page display; no total entry-count gate. |
+| `archive.bytes` | 32 MiB | bytes | budget | Structured XML projection working buffer; larger content streams in full into the paged source report. |
 
 ## numpy
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `numpy.header_bytes` | 64 KiB | bytes | budget | Metadata interpretation window; the complete header remains available in the generated paged report. |
-| `numpy.values` | None | items | unlimited | Numeric values stream to a disk-backed paged report; no prefix-only preview. |
+| `numpy.header_bytes` | 64 KiB | bytes | budget | Header string-token working buffer. Scan fields across the complete streamed header; preserve all header bytes and all supported numeric values in the paged report. |
+| `numpy.values` | None | items | unlimited | Supported numeric values stream to a disk-backed paged report; no prefix-only value count. |
 
 ## geometry
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `geometry.input_bytes` | 16 MiB | bytes | fallback | Static projection working budget; oversized projections open complete source pages instead of rejecting or silently truncating the file. |
-| `geometry.vertices` | 100,000 | items | fallback | Static projection working budget; oversized projections open complete source pages instead of rejecting or silently truncating the file. |
-| `geometry.faces` | 100,000 | items | fallback | Static projection working budget; oversized projections open complete source pages instead of rejecting or silently truncating the file. |
-| `geometry.polygon_vertices` | 256 | items | fallback | Static projection working budget; oversized projections open complete source pages instead of rejecting or silently truncating the file. |
+| `geometry.input_bytes` | 16 MiB | bytes | fallback | Static mesh projection working budget; larger projections open complete source/hex pages rather than rejecting or silently cutting the file. |
+| `geometry.vertices` | 100,000 | items | fallback | Static mesh projection working budget; larger projections open complete source/hex pages rather than rejecting or silently cutting the file. |
+| `geometry.faces` | 100,000 | items | fallback | Static mesh projection working budget; larger projections open complete source/hex pages rather than rejecting or silently cutting the file. |
+| `geometry.polygon_vertices` | 256 | items | fallback | Static mesh projection working budget; larger projections open complete source/hex pages rather than rejecting or silently cutting the file. |
 
 ## bdf
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `bdf.glyph_edge` | 64 | pixels | fallback | Static projection working budget; oversized projections open complete source pages instead of rejecting or silently truncating the file. |
-| `bdf.glyphs` | 64 | items | fallback | Static projection working budget; oversized projections open complete source pages instead of rejecting or silently truncating the file. |
+| `bdf.glyph_edge` | 64 | pixels | fallback | Bitmap-font projection working budget; beyond it, complete BDF source pages remain available instead of a silently shortened glyph list. |
+| `bdf.glyphs` | 64 | items | fallback | Bitmap-font projection working budget; beyond it, complete BDF source pages remain available instead of a silently shortened glyph list. |
 
 ## executable
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `executable.input_bytes` | None | bytes | unlimited | Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging. |
-| `executable.name_chars` | None | characters | unlimited | Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging. |
-| `executable.architectures` | None | items | unlimited | Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging. |
-| `executable.hex_bytes` | 4 KiB | bytes | budget | Hex excerpt in the metadata report; file bytes remain accessible through the paged raw view. |
-| `executable.segments` | None | items | unlimited | Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging. |
-| `executable.sections` | None | items | unlimited | Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging. |
-| `executable.report_bytes` | None | bytes | unlimited | Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging. |
-| `executable.libraries` | None | items | unlimited | Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging. |
-| `executable.dynamic_entries` | None | items | unlimited | Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging. |
-| `executable.name_scan_bytes` | None | bytes | unlimited | Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging. |
+| `executable.input_bytes` | None | bytes | unlimited | No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff. |
+| `executable.name_chars` | None | characters | unlimited | No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff. |
+| `executable.architectures` | None | items | unlimited | No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff. |
+| `executable.hex_bytes` | 4 KiB | bytes | budget | Hex excerpt within the metadata report; complete file bytes remain accessible through raw paging. |
+| `executable.segments` | None | items | unlimited | No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff. |
+| `executable.sections` | None | items | unlimited | No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff. |
+| `executable.report_bytes` | None | bytes | unlimited | No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff. |
+| `executable.libraries` | None | items | unlimited | No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff. |
+| `executable.dynamic_entries` | None | items | unlimited | No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff. |
+| `executable.name_scan_bytes` | None | bytes | unlimited | No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff. |
 
 ## tensor
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `tensor.header_bytes` | None | bytes | unlimited | Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded. |
-| `tensor.rows` | None | items | unlimited | Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded. |
-| `tensor.report_bytes` | None | bytes | unlimited | Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded. |
-| `tensor.shape_dimensions` | None | items | unlimited | Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded. |
-| `tensor.metadata_entries` | None | items | unlimited | Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded. |
-| `tensor.name_chars` | None | characters | unlimited | Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded. |
-| `tensor.dtype_chars` | None | characters | unlimited | Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded. |
-| `tensor.metadata_key_chars` | None | characters | unlimited | Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded. |
-| `tensor.metadata_value_chars` | None | characters | unlimited | Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded. |
+| `tensor.header_bytes` | None | bytes | unlimited | Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate. |
+| `tensor.rows` | None | items | unlimited | Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate. |
+| `tensor.report_bytes` | None | bytes | unlimited | Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate. |
+| `tensor.shape_dimensions` | None | items | unlimited | Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate. |
+| `tensor.metadata_entries` | None | items | unlimited | Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate. |
+| `tensor.name_chars` | None | characters | unlimited | Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate. |
+| `tensor.dtype_chars` | None | characters | unlimited | Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate. |
+| `tensor.metadata_key_chars` | None | characters | unlimited | Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate. |
+| `tensor.metadata_value_chars` | None | characters | unlimited | Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate. |
 
 ## sqlite
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `sqlite.snapshot_bytes` | None | bytes | unlimited | The snapshot copies in fixed-size blocks, without a total database size gate. |
-| `sqlite.page_rows` | 500 | rows | budget | sqlite: page rows |
-| `sqlite.tables` | 5,000 | items | page | Column/catalog page size with explicit navigation to remaining items. |
-| `sqlite.columns` | 256 | columns | page | Column/catalog page size with explicit navigation to remaining items. |
-| `sqlite.value_bytes` | None | bytes | unlimited | Retain native SQLite format limits; full values and definitions load on explicit request. |
-| `sqlite.text_bytes` | 512 | bytes | budget | Cell summary only; double-click loads the complete value (BLOB shown as hex). |
-| `sqlite.schema_text_bytes` | None | bytes | unlimited | Retain native SQLite format limits; full values and definitions load on explicit request. |
-| `sqlite.blob_bytes` | 16 | bytes | budget | Cell summary only; double-click loads the complete value (BLOB shown as hex). |
-| `sqlite.query_seconds` | 5 | seconds | timeout | Initial query allowance; Retry with more time extends it explicitly instead of imposing a permanent timeout. |
-| `sqlite.busy_milliseconds` | 1,000 | milliseconds | timeout | sqlite: busy milliseconds |
-| `sqlite.cache_kib` | 8,192 | KiB | budget | sqlite: cache kib |
+| `sqlite.snapshot_bytes` | None | bytes | unlimited | Copy the snapshot in fixed-size blocks, without an application database total-size gate. |
+| `sqlite.page_rows` | 500 | rows | page | Rows per table/schema page; previous/next controls expose all remaining rows. |
+| `sqlite.tables` | 5,000 | items | page | Catalog/column page size with explicit continuation to the remaining entries. |
+| `sqlite.columns` | 256 | columns | page | Catalog/column page size with explicit continuation to the remaining entries. |
+| `sqlite.value_bytes` | None | bytes | unlimited | Use native SQLite format constraints; full values and definitions are read in text.page_bytes windows with previous/next navigation. |
+| `sqlite.text_bytes` | 512 | bytes | budget | Visible cell summary only; double-click opens a complete paged value, with binary values shown as hex. |
+| `sqlite.schema_text_bytes` | None | bytes | unlimited | Use native SQLite format constraints; full values and definitions are read in text.page_bytes windows with previous/next navigation. |
+| `sqlite.blob_bytes` | 16 | bytes | budget | Visible cell summary only; double-click opens a complete paged value, with binary values shown as hex. |
+| `sqlite.query_seconds` | 5 | seconds | timeout | Initial cancellable query time allowance; Retry with more time explicitly extends it. |
+| `sqlite.busy_milliseconds` | 1,000 | milliseconds | timeout | Native SQLite lock-wait allowance; a busy database can be retried and is not rejected by file size. |
+| `sqlite.cache_kib` | 8,192 | KiB | budget | SQLite page-cache working memory; larger databases read further pages from disk. |
 
 ## markup
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `markup.scan_bytes` | None | bytes | unlimited | Scan the current document text for picture/image references; large source documents already use bounded editor pages. |
+| `markup.scan_bytes` | None | bytes | unlimited | Scan the current text for image references; large documents use source pages instead of a total reference-scan cutoff. |
 
 ## remote_image
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `remote_image.input_bytes` | None | bytes | unlimited | HTTP data streams into a temporary file; static previews decode bounded thumbnails and GIFs stream from the file. |
-| `remote_image.timeout_seconds` | 20 | seconds | timeout | Idle/no-progress timeout; active downloads have no fixed total elapsed time cap. |
-| `remote_image.first_attempt_seconds` | 8 | seconds | timeout | Connection allowance for the first raw GitHub URL before the API fallback. |
-| `remote_image.svg_embedded_bytes` | 64 MiB | bytes | budget | Per-embedded-image preview working memory; SVG images are processed individually instead of accumulating a document-wide rejection budget. |
-| `remote_image.redirects` | 5 | items | budget | Redirect-chain budget prevents request loops; it does not constrain image size. |
-| `remote_image.connect_seconds` | 8 | seconds | timeout | remote image: connect seconds |
-| `remote_image.minimum_bytes_per_second` | 1 | bytes/second | timeout | Minimum progress used with the idle timeout; not a bandwidth ceiling. |
+| `remote_image.input_bytes` | None | bytes | unlimited | HTTP downloads stream to a temporary file and prepare bounded thumbnails; source input size is not an application rejection gate. |
+| `remote_image.timeout_seconds` | 20 | seconds | timeout | Idle/no-progress timeout; active downloads have no fixed total elapsed-time ceiling. |
+| `remote_image.first_attempt_seconds` | 8 | seconds | timeout | Connection establishment allowance, including the first GitHub raw URL attempt before API fallback. |
+| `remote_image.svg_embedded_bytes` | 64 MiB | bytes | budget | Per-embedded-image working memory in SVG preparation; original SVG content remains available through Source or file-byte access. |
+| `remote_image.redirects` | 5 | items | budget | Redirect-chain budget prevents request loops; it does not constrain image-file size. |
+| `remote_image.connect_seconds` | 8 | seconds | timeout | Connection establishment allowance, including the first GitHub raw URL attempt before API fallback. |
+| `remote_image.minimum_bytes_per_second` | 1 | bytes/second | timeout | Minimum progress for the idle timeout, not a bandwidth ceiling. |
 
 ## diagram
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `diagram.blocks` | 128 | items | reject | diagram: blocks |
-| `diagram.source_bytes` | 256 KiB | bytes | reject | diagram: source bytes |
-| `diagram.svg_bytes` | 8 MiB | bytes | reject | diagram: svg bytes |
-| `diagram.aggregate_encoded_bytes` | 64 MiB | bytes | budget | diagram: aggregate encoded bytes |
-| `diagram.aggregate_decoded_bytes` | 128 MiB | bytes | budget | diagram: aggregate decoded bytes |
-| `diagram.preview_edge` | 2,400 | pixels | truncate | diagram: preview edge |
-| `diagram.startup_seconds` | 15 | seconds | timeout | diagram: startup seconds |
-| `diagram.block_seconds` | 8 | seconds | timeout | diagram: block seconds |
-| `diagram.ipc_bytes` | 128 MiB | bytes | budget | diagram: ipc bytes |
-| `diagram.slot_bytes` | 16 MiB | bytes | budget | diagram: slot bytes |
-| `diagram.max_upscale` | 2 | scale | budget | diagram: max upscale |
-| `diagram.request_bytes` | 64 MiB | bytes | budget | diagram: request bytes |
-| `diagram.message_bytes` | 16388 KiB | bytes | budget | diagram: message bytes |
-| `diagram.mermaid_edges` | 1,000 | edges | reject | diagram: mermaid edges |
-| `diagram.math_macros` | 1,000 | expansions | reject | diagram: math macros |
+| `diagram.blocks` | 8 | items | page | Diagrams per active preview page. Previous/next controls expose the rest; switching pages releases the previous raster snapshot. |
+| `diagram.source_bytes` | 256 KiB | bytes | fallback | Per-diagram structured-render working budget; failures preserve the complete block source. Other diagram pages remain accessible. |
+| `diagram.svg_bytes` | 8 MiB | bytes | fallback | Per-diagram structured-render working budget; failures preserve the complete block source. Other diagram pages remain accessible. |
+| `diagram.aggregate_encoded_bytes` | 64 MiB | bytes | budget | Encoded/decoded images retained for one active diagram page. Switching pages releases the prior raster snapshot; this is not a document total gate. |
+| `diagram.aggregate_decoded_bytes` | 128 MiB | bytes | budget | Encoded/decoded images retained for one active diagram page. Switching pages releases the prior raster snapshot; this is not a document total gate. |
+| `diagram.preview_edge` | 2,400 | pixels | budget | Active raster resolution/scale budget. Page raster dimensions also adapt to aggregate working memory, independently of document length. |
+| `diagram.startup_seconds` | 15 | seconds | timeout | Cancellable renderer startup/per-block time allowance; an unfinished block shows its complete source instead of rejecting the Markdown document. |
+| `diagram.block_seconds` | 8 | seconds | timeout | Cancellable renderer startup/per-block time allowance; an unfinished block shows its complete source instead of rejecting the Markdown document. |
+| `diagram.ipc_bytes` | 128 MiB | bytes | budget | One page/request or one block IPC working buffer; document batches are paged and oversized render results preserve the complete source block. |
+| `diagram.slot_bytes` | 16 MiB | bytes | budget | One page/request or one block IPC working buffer; document batches are paged and oversized render results preserve the complete source block. |
+| `diagram.max_upscale` | 2 | scale | budget | Active raster resolution/scale budget. Page raster dimensions also adapt to aggregate working memory, independently of document length. |
+| `diagram.request_bytes` | 64 MiB | bytes | budget | One page/request or one block IPC working buffer; document batches are paged and oversized render results preserve the complete source block. |
+| `diagram.message_bytes` | 16388 KiB | bytes | budget | One page/request or one block IPC working buffer; document batches are paged and oversized render results preserve the complete source block. |
+| `diagram.mermaid_edges` | 1,000 | edges | fallback | Per-diagram structured-render working budget; failures preserve the complete block source. Other diagram pages remain accessible. |
+| `diagram.math_macros` | 1,000 | expansions | budget | Math interpreter expansion budget to bound recursive work; the complete formula source remains available when rendering cannot finish. |
 
 ## book
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `book.chapter_bytes` | 4 MiB | bytes | reject | book: chapter bytes |
-| `book.xml_nodes` | 250,000 | nodes | reject | book: xml nodes |
-| `book.resource_bytes` | 32 MiB | bytes | reject | book: resource bytes |
-| `book.preview_edge` | 2,400 | pixels | truncate | book: preview edge |
-| `book.input_bytes` | 256 MiB | bytes | reject | book: input bytes |
-| `book.text_bytes` | 64 MiB | bytes | reject | book: text bytes |
-| `book.archive_entries` | 20,000 | items | reject | book: archive entries |
-| `book.chapters` | 2,000 | items | reject | book: chapters |
-| `book.metadata_bytes` | 16 KiB | bytes | reject | book: metadata bytes |
-| `book.toc_entries` | 10,000 | items | reject | book: toc entries |
-| `book.toc_depth` | 32 | levels | truncate | book: toc depth |
-| `book.fb2_depth` | 64 | levels | reject | book: fb2 depth |
-| `book.html_depth` | 128 | levels | reject | book: html depth |
-| `book.chapter_decoded_bytes` | 128 MiB | bytes | budget | book: chapter decoded bytes |
-| `book.chapter_images` | 128 | items | reject | book: chapter images |
-| `book.image_decoded_bytes` | 128 MiB | bytes | budget | book: image decoded bytes |
-| `book.image_edge` | 10,000 | pixels | reject | book: image edge |
+| `book.chapter_bytes` | 4 MiB | bytes | fallback | Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off. |
+| `book.xml_nodes` | 250,000 | nodes | fallback | Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off. |
+| `book.resource_bytes` | None | bytes | unlimited | Requested archive images stream to a private file and use native thumbnail decoding; no source-resource byte or pixel-edge gate. Only the active chapter/page previews are retained. |
+| `book.preview_edge` | 2,400 | pixels | budget | Thumbnail resolution for the requested illustration/comic page; this does not reject the original image. |
+| `book.input_bytes` | None | bytes | unlimited | No application book/archive/chapter/catalog/metadata total gate. Structured parsing keeps a working budget; oversized metadata exposes every archive member as complete source or byte pages. |
+| `book.text_bytes` | 64 MiB | bytes | fallback | Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off. |
+| `book.archive_entries` | None | items | unlimited | No application book/archive/chapter/catalog/metadata total gate. Structured parsing keeps a working budget; oversized metadata exposes every archive member as complete source or byte pages. |
+| `book.chapters` | None | items | unlimited | No application book/archive/chapter/catalog/metadata total gate. Structured parsing keeps a working budget; oversized metadata exposes every archive member as complete source or byte pages. |
+| `book.metadata_bytes` | None | bytes | unlimited | No application book/archive/chapter/catalog/metadata total gate. Structured parsing keeps a working budget; oversized metadata exposes every archive member as complete source or byte pages. |
+| `book.toc_entries` | None | items | unlimited | No application book/archive/chapter/catalog/metadata total gate. Structured parsing keeps a working budget; oversized metadata exposes every archive member as complete source or byte pages. |
+| `book.toc_depth` | 32 | levels | budget | Visual TOC indentation only; retain all nested entries and their actual hierarchy depth instead of cutting the catalog. |
+| `book.fb2_depth` | 64 | levels | fallback | Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off. |
+| `book.html_depth` | 128 | levels | fallback | Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off. |
+| `book.chapter_decoded_bytes` | 128 MiB | bytes | fallback | Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off. |
+| `book.chapter_images` | 128 | items | fallback | Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off. |
+| `book.image_decoded_bytes` | None | bytes | unlimited | Requested archive images stream to a private file and use native thumbnail decoding; no source-resource byte or pixel-edge gate. Only the active chapter/page previews are retained. |
+| `book.image_edge` | None | pixels | unlimited | Requested archive images stream to a private file and use native thumbnail decoding; no source-resource byte or pixel-edge gate. Only the active chapter/page previews are retained. |
 
 ## book_state
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `book_state.bookmarks` | None | items | unlimited | All bookmarks are persisted; no total bookmark count gate. |
-| `book_state.label_bytes` | None | bytes | unlimited | Persist complete bookmark labels without an arbitrary byte gate. |
-| `book_state.input_bytes` | None | bytes | unlimited | Reading-state JSON is streamed from disk without a total input-size gate. |
-| `book_state.label_chars` | 120 | characters | budget | Derived bookmark label excerpt; the complete chapter remains accessible at the bookmark location. |
+| `book_state.bookmarks` | None | items | unlimited | Persist all bookmarks, labels and reading-state entries; no application bookmark-count or input-size gate. |
+| `book_state.label_bytes` | None | bytes | unlimited | Persist all bookmarks, labels and reading-state entries; no application bookmark-count or input-size gate. |
+| `book_state.input_bytes` | None | bytes | unlimited | Persist all bookmarks, labels and reading-state entries; no application bookmark-count or input-size gate. |
+| `book_state.label_chars` | 120 | characters | budget | Derived bookmark/header/catalog label excerpt; chapter targets and full-metadata/text dialogs retain the complete content. |
 
 ## geo
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `geo.points` | 10,000 | items | truncate | geo: points |
+| `geo.points` | 10,000 | items | page | Coordinates per table page; previous/next navigation covers all GPX/KML points and Source preserves the complete XML. |
 
 ## git
 
@@ -317,35 +318,36 @@ This page is generated from the same policy. After editing it, run `python3 scri
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `workspace.search_results` | 60 | items | page | Visible page/batch size; later results or history remain accessible through navigation. |
-| `workspace.search_entries` | None | items | unlimited | Search walks all eligible entries and supports cancellable paged results. |
-| `workspace.recent_workspaces` | 30 | items | page | Visible page/batch size; later results or history remain accessible through navigation. |
+| `workspace.search_results` | 60 | items | page | Visible page/batch size; later search results or saved workspaces remain accessible through continuation controls. |
+| `workspace.search_entries` | None | items | unlimited | Search traverses all eligible entries with cancellable result pages; there is no entry-scan total cutoff. |
+| `workspace.recent_workspaces` | 30 | items | page | Visible page/batch size; later search results or saved workspaces remain accessible through continuation controls. |
 
 ## update
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `update.session_bytes` | None | bytes | unlimited | Stream JSON session I/O and retain all actual windows, roots and tabs; validate identities and active indexes. |
-| `update.workspaces` | None | items | unlimited | Stream JSON session I/O and retain all actual windows, roots and tabs; validate identities and active indexes. |
-| `update.roots_per_workspace` | None | items | unlimited | Stream JSON session I/O and retain all actual windows, roots and tabs; validate identities and active indexes. |
-| `update.tabs_per_workspace` | None | items | unlimited | Stream JSON session I/O and retain all actual windows, roots and tabs; validate identities and active indexes. |
+| `update.session_bytes` | None | bytes | unlimited | Stream session JSON and preserve all actual windows, roots and tabs while validating identities and active indexes. |
+| `update.workspaces` | None | items | unlimited | Stream session JSON and preserve all actual windows, roots and tabs while validating identities and active indexes. |
+| `update.roots_per_workspace` | None | items | unlimited | Stream session JSON and preserve all actual windows, roots and tabs while validating identities and active indexes. |
+| `update.tabs_per_workspace` | None | items | unlimited | Stream session JSON and preserve all actual windows, roots and tabs while validating identities and active indexes. |
 
 ## audio_artwork
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `audio_artwork.input_bytes` | 8 MiB | bytes | budget | audio artwork: input bytes |
-| `audio_artwork.preview_edge` | 600 | pixels | truncate | audio artwork: preview edge |
+| `audio_artwork.input_bytes` | None | bytes | unlimited | Native metadata artwork is thumbnailed without an application byte gate. Open full artwork exposes its complete original snapshot. |
+| `audio_artwork.preview_edge` | 600 | pixels | budget | Active cover thumbnail resolution; Open full artwork retains full-resolution source access. |
 
 ## io
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `io.buffer_bytes` | 64 KiB | bytes | budget | Working buffer for cancellable streaming reads and temporary-text generation; independent of total file size. |
-| `io.cache_bytes` | 64 MiB | bytes | budget | Rolling decoded-text cache. Older ranges are evicted and can be regenerated by seeking through the source stream. |
+| `io.buffer_bytes` | 64 KiB | bytes | budget | Fixed working buffer for cancellable streaming reads, copies and report generation, independent of total source size. |
+| `io.cache_bytes` | 64 MiB | bytes | budget | Working cache/projection allowance for decoded text, executable metadata and vector/font projection buffers. Old text ranges regenerate; oversized representations retain complete source/byte pages. |
+| `io.record_bytes` | 64 MiB | bytes | budget | One active XML/structured metadata record or value, independent of total file size; oversized records retain complete Source/header pages or native preview access. |
 
 ## svg
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `svg.event_bytes` | 64 MiB | bytes | budget | One active XML markup/text record in the streaming SVG sanitizer; independent of total document size. |
+| `svg.event_bytes` | 64 MiB | bytes | budget | One active XML markup/text record in the sanitizer, not a document total gate; native File bytes retains the complete source when preparation exceeds this budget. |

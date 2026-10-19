@@ -96,6 +96,7 @@ impl Workspace {
                     r.diff.clone(),
                     r.repository_root.clone(),
                     r.native_image_stamp(cx),
+                    r.page_refresh_request(cx),
                 )
             })
             .collect::<Vec<_>>();
@@ -107,7 +108,7 @@ impl Workspace {
             let repos = repositories_for_roots(&roots);
             let contents = targets
                 .into_iter()
-                .filter_map(|(path, diff, root, image_stamp)| {
+                .filter_map(|(path, diff, root, image_stamp, page_refresh)| {
                     if let Some(expected) = image_stamp
                         && std::fs::metadata(&path)
                             .is_ok_and(|m| (m.len(), m.modified().ok()) == expected)
@@ -117,6 +118,12 @@ impl Workspace {
                     let scope = diff.as_ref().map(|d| d.scope);
                     let content = if let (Some(change), Some(root)) = (diff, root) {
                         read_diff(&root, &change).map(|d| Content::Diff(d, root))
+                    } else if let Some(request) = page_refresh {
+                        match request.read(&cancel) {
+                            Ok(None) => return None,
+                            Ok(Some(page)) => Ok(Content::Page(page)),
+                            Err(error) => Err(error),
+                        }
                     } else {
                         super::loading::read_content_cancellable(&path, &cancel)
                     };

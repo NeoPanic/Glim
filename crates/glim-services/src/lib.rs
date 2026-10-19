@@ -7,6 +7,7 @@ pub mod executables;
 pub mod files;
 pub mod formats;
 mod fragmented_mp4;
+pub mod geo;
 pub mod git;
 pub mod inline_images;
 pub mod json;
@@ -32,6 +33,7 @@ pub mod watch;
 pub mod work;
 pub mod workspace;
 pub mod xmind;
+mod xml;
 
 pub mod updates;
 

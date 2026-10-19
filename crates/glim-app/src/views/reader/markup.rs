@@ -1,4 +1,5 @@
 use super::{OpenLink, diagrams::DiagramPreview, pictures::Pictures, source::SourceReader};
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     base::{TextView, TextViewState},
     component::{ActiveTheme, scroll::Scrollbar},
@@ -232,7 +233,11 @@ impl MarkupReader {
         } else {
             text_view
         };
-        div()
+        let diagram_controls = self
+            .diagrams
+            .as_ref()
+            .and_then(|view| DiagramPreview::controls(view, cx));
+        let body = div()
             .relative()
             .size_full()
             .overflow_hidden()
@@ -312,7 +317,12 @@ impl MarkupReader {
                     .w(px(110.))
                     .child(self.source.minimap.clone()),
             )
-            .child(Scrollbar::vertical(&self.scroll))
+            .child(Scrollbar::vertical(&self.scroll));
+        gpui_kit::component::v_flex()
+            .size_full()
+            .min_h_0()
+            .when_some(diagram_controls, |view, controls| view.child(controls))
+            .child(div().flex_1().min_h_0().w_full().child(body))
             .into_any_element()
     }
 }

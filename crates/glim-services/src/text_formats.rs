@@ -1,5 +1,4 @@
 //! Conservative first-pass document projection. Original text stays editable.
-use crate::limits as reader_limits;
 use std::path::Path;
 pub fn supports(path: &Path) -> bool {
     path.file_name()
@@ -107,7 +106,6 @@ fn coordinates(text: &str) -> String {
         crate::locale::tr("Altitude")
     );
     let mut in_coordinates = false;
-    let mut count = 0;
     loop {
         match reader.read_event() {
             Ok(Event::Start(tag) | Event::Empty(tag)) => {
@@ -130,16 +128,12 @@ fn coordinates(text: &str) -> String {
                         && lon.is_finite()
                     {
                         output.push_str(&format!("| {lon} | {lat} | |\n"));
-                        count += 1;
                     }
                 }
             }
             Ok(Event::Text(value)) if in_coordinates => {
                 if let Ok(value) = value.decode() {
-                    for point in value
-                        .split_whitespace()
-                        .take(reader_limits::GEO_POINTS - count)
-                    {
+                    for point in value.split_whitespace() {
                         let values: Vec<_> = point
                             .split(',')
                             .filter_map(|v| v.parse::<f64>().ok())
@@ -151,7 +145,6 @@ fn coordinates(text: &str) -> String {
                                 values[1],
                                 values.get(2).copied().unwrap_or(0.0)
                             ));
-                            count += 1;
                         }
                     }
                 }
@@ -162,10 +155,6 @@ fn coordinates(text: &str) -> String {
             Ok(Event::Eof) => break,
             Err(error) => return format!("{}: {error}", crate::locale::tr("XML parsing failed")),
             _ => {}
-        }
-        if count >= reader_limits::GEO_POINTS {
-            output.push_str(&crate::locale::tr("\nCoordinate preview truncated\n"));
-            break;
         }
     }
     output

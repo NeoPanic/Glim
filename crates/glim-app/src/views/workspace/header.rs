@@ -440,7 +440,18 @@ impl Workspace {
                             .top_0()
                             .h_full()
                             .gap_1()
-                            .child(self.workspace_toolbar(cx)),
+                            .child(self.workspace_toolbar(cx))
+                            .when(self.saving.is_some() && self.save_cancel.is_some(), |row| {
+                                row.child(
+                                    Button::new("cancel-file-save")
+                                        .ghost()
+                                        .small()
+                                        .label(glim_services::locale::tr("Cancel save"))
+                                        .on_click(
+                                            cx.listener(|view, _, _, cx| view.cancel_save(cx)),
+                                        ),
+                                )
+                            }),
                     ),
                 cx,
             ))

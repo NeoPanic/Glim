@@ -8,42 +8,56 @@
         "type": "u64",
         "unit": "bytes",
         "effect": "fallback",
-        "description": "Large/long-line text switches to editable pages; saving streams unchanged ranges through an atomic replacement without a total file-size cap."
+        "description": "In-memory editor working budget; larger/long-line documents use editable pages and streaming atomic saves, without a file-size rejection.",
+        "description_zh": "内存编辑器工作预算；更大或长行文档使用可编辑分页及流式原子保存，不拒绝整个文件。"
       },
       "editable_newlines": {
         "value": 400000,
         "type": "usize",
         "unit": "items",
         "effect": "fallback",
-        "description": "Large/long-line text switches to editable pages; saving streams unchanged ranges through an atomic replacement without a total file-size cap."
+        "description": "In-memory editor working budget; larger/long-line documents use editable pages and streaming atomic saves, without a file-size rejection.",
+        "description_zh": "内存编辑器工作预算；更大或长行文档使用可编辑分页及流式原子保存，不拒绝整个文件。"
       },
       "line_bytes": {
         "value": 65536,
         "type": "usize",
         "unit": "bytes",
         "effect": "fallback",
-        "description": "Large/long-line text switches to editable pages; saving streams unchanged ranges through an atomic replacement without a total file-size cap."
+        "description": "In-memory editor working budget; larger/long-line documents use editable pages and streaming atomic saves, without a file-size rejection.",
+        "description_zh": "内存编辑器工作预算；更大或长行文档使用可编辑分页及流式原子保存，不拒绝整个文件。"
       },
       "page_bytes": {
         "value": 1048576,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "text: page bytes"
+        "description": "Bytes per normal text page; following pages preserve the rest of the file.",
+        "description_zh": "普通文本每页读取字节数，后续页面保留其余完整内容。"
       },
       "full_bytes": {
         "value": 268435456,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Maximum bytes in an expanded read-only page, independent of total file size."
+        "description": "Expanded-page working budget, not a full-file gate; previous/next controls keep the rest accessible. Editable and streamed sources also retain their own working budgets.",
+        "description_zh": "展开页的工作预算，不是完整文件门槛；上一页／下一页仍可访问其余内容，可编辑及流式来源还受各自工作预算管理。"
       },
       "full_newlines": {
         "value": 4000000,
         "type": "usize",
         "unit": "items",
         "effect": "budget",
-        "description": "Maximum newlines in an expanded page; remaining text stays available on the next page."
+        "description": "Expanded-page working budget, not a full-file gate; previous/next controls keep the rest accessible. Editable and streamed sources also retain their own working budgets.",
+        "description_zh": "展开页的工作预算，不是完整文件门槛；上一页／下一页仍可访问其余内容，可编辑及流式来源还受各自工作预算管理。"
+      },
+      "layout_run_bytes": {
+        "value": 1024,
+        "type": "usize",
+        "unit": "bytes",
+        "effect": "budget",
+        "description": "Maximum text run per virtual read-only row; long logical lines wrap into further rows without losing source bytes.",
+        "description_zh": "只读虚拟行单次排版的文本预算；超长逻辑行拆成后续显示行，源字节不丢失。"
       }
     },
     "binary": {
@@ -52,7 +66,8 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "page",
-        "description": "Bytes read per hex page; previous/next navigation exposes the complete file."
+        "description": "Bytes per hex page; previous/next controls expose the complete file.",
+        "description_zh": "十六进制每页读取字节数，上一页／下一页可访问完整文件。"
       }
     },
     "image": {
@@ -61,28 +76,32 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "File-backed native image loading or streamed thumbnail preparation; source size and pixel count do not reject the file."
+        "description": "File-backed native image loading has no application input-byte or total-pixel gate; File bytes preserves complete source access.",
+        "description_zh": "基于文件的原生图片读取不设输入字节或像素总量门槛，“文件字节”保留完整源文件访问。"
       },
       "pixels": {
         "value": null,
         "type": "u64",
         "unit": "pixels",
         "effect": "unlimited",
-        "description": "File-backed native image loading or streamed thumbnail preparation; source size and pixel count do not reject the file."
+        "description": "File-backed native image loading has no application input-byte or total-pixel gate; File bytes preserves complete source access.",
+        "description_zh": "基于文件的原生图片读取不设输入字节或像素总量门槛，“文件字节”保留完整源文件访问。"
       },
       "decoded_bytes": {
         "value": 536870912,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Active scanline/encoder working budget for QOI conversion; native image decoding loads one requested page."
+        "description": "Active native/QOI preview raster working memory. QOI samples pixels while streaming instead of rejecting wide source scanlines; actual-size mode may use a scaled raster and complete original file bytes remain accessible.",
+        "description_zh": "原生／QOI 当前预览图片的工作内存。QOI 流式采样像素，不拒绝较宽的源扫描行；原尺寸模式可能使用缩放图片，完整原始文件字节仍可访问。"
       },
       "preview_edge": {
         "value": 4000,
         "type": "u32",
         "unit": "pixels",
         "effect": "budget",
-        "description": "Initial ImageIO preview resolution. Original resolution loads explicitly for the current page, with pan/zoom."
+        "description": "Initial ImageIO thumbnail resolution. Actual-size mode may increase the raster within image.decoded_bytes; it never rejects a file based on original dimensions.",
+        "description_zh": "初始 ImageIO 缩略图分辨率。原尺寸模式可在 image.decoded_bytes 内提高图片分辨率，不按原图尺寸拒绝文件。"
       }
     },
     "gif": {
@@ -91,28 +110,32 @@
         "type": "u32",
         "unit": "pixels",
         "effect": "budget",
-        "description": "Displayed animation texture size, independent of source size and frame count."
+        "description": "Displayed animation texture edge, independent of source size and frame count.",
+        "description_zh": "动画显示纹理边长，与源文件大小和总帧数无关。"
       },
       "canvas_bytes": {
         "value": 536870912,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Compositing working memory. Oversized canvases are sampled while decoding rows, rather than rejecting the animation."
+        "description": "Compositing working memory; oversized source canvases are sampled while decoding rows instead of rejecting the animation.",
+        "description_zh": "合成工作内存预算；较大的源画布按行解码并采样，不拒绝整个动画。"
       },
       "batch_bytes": {
         "value": 16777216,
         "type": "usize",
         "unit": "bytes",
         "effect": "budget",
-        "description": "gif: batch bytes"
+        "description": "Per-batch animation prefetch budget; consumed frames are released and later frames remain available.",
+        "description_zh": "每批动画预取预算；已消费帧会释放，后续帧仍可继续读取。"
       },
       "batch_frames": {
         "value": 3,
         "type": "usize",
         "unit": "items",
         "effect": "budget",
-        "description": "gif: batch frames"
+        "description": "Per-batch animation prefetch budget; consumed frames are released and later frames remain available.",
+        "description_zh": "每批动画预取预算；已消费帧会释放，后续帧仍可继续读取。"
       }
     },
     "tiff": {
@@ -121,28 +144,32 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Native ImageIO loads the requested TIFF page on demand; page count and aggregate decoded/encoded preview totals do not gate opening."
+        "description": "ImageIO loads the requested TIFF page on demand, with no application page-count or aggregate-preview total gate.",
+        "description_zh": "ImageIO 按需读取所请求的 TIFF 页，不设应用层页数或累计预览总量门槛。"
       },
       "pages": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Native ImageIO loads the requested TIFF page on demand; page count and aggregate decoded/encoded preview totals do not gate opening."
+        "description": "ImageIO loads the requested TIFF page on demand, with no application page-count or aggregate-preview total gate.",
+        "description_zh": "ImageIO 按需读取所请求的 TIFF 页，不设应用层页数或累计预览总量门槛。"
       },
       "preview_decoded_bytes": {
         "value": null,
         "type": "u64",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Native ImageIO loads the requested TIFF page on demand; page count and aggregate decoded/encoded preview totals do not gate opening."
+        "description": "ImageIO loads the requested TIFF page on demand, with no application page-count or aggregate-preview total gate.",
+        "description_zh": "ImageIO 按需读取所请求的 TIFF 页，不设应用层页数或累计预览总量门槛。"
       },
       "preview_encoded_bytes": {
         "value": null,
         "type": "u64",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Native ImageIO loads the requested TIFF page on demand; page count and aggregate decoded/encoded preview totals do not gate opening."
+        "description": "ImageIO loads the requested TIFF page on demand, with no application page-count or aggregate-preview total gate.",
+        "description_zh": "ImageIO 按需读取所请求的 TIFF 页，不设应用层页数或累计预览总量门槛。"
       }
     },
     "inline_image": {
@@ -151,28 +178,32 @@
         "type": "u32",
         "unit": "pixels",
         "effect": "budget",
-        "description": "Inline thumbnail resolution; complete source images remain available in their standalone reader."
+        "description": "Inline thumbnail resolution/decoded/output working budget; the original remains available through its standalone reader or source URL.",
+        "description_zh": "内联缩略图的分辨率、解码及输出工作预算；原图仍可通过独立阅读器或源 URL 访问。"
       },
       "encoded_bytes": {
         "value": null,
         "type": "usize",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "File-backed native image loading or streamed thumbnail preparation; source size and pixel count do not reject the file."
+        "description": "File-backed or streamed image preparation has no application encoded-file-size gate.",
+        "description_zh": "基于文件或流式准备图片，不设置应用编码文件总大小门槛。"
       },
       "decoded_bytes": {
         "value": 67108864,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "inline image: decoded bytes"
+        "description": "Inline thumbnail resolution/decoded/output working budget; the original remains available through its standalone reader or source URL.",
+        "description_zh": "内联缩略图的分辨率、解码及输出工作预算；原图仍可通过独立阅读器或源 URL 访问。"
       },
       "output_overhead_bytes": {
         "value": 1048576,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "inline image: output overhead bytes"
+        "description": "Inline thumbnail resolution/decoded/output working budget; the original remains available through its standalone reader or source URL.",
+        "description_zh": "内联缩略图的分辨率、解码及输出工作预算；原图仍可通过独立阅读器或源 URL 访问。"
       }
     },
     "font": {
@@ -181,28 +212,32 @@
         "type": "u64",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "System font metadata is loaded from the file; all faces and sample text remain accessible."
+        "description": "System file-backed font metadata retains all faces, resources and sample text without application total gates.",
+        "description_zh": "系统基于文件读取字体元数据，不以应用总量门槛截掉字体面、资源或样本文本。"
       },
       "faces": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "System font metadata is loaded from the file; all faces and sample text remain accessible."
+        "description": "System file-backed font metadata retains all faces, resources and sample text without application total gates.",
+        "description_zh": "系统基于文件读取字体元数据，不以应用总量门槛截掉字体面、资源或样本文本。"
       },
       "resource_types": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "System font metadata is loaded from the file; all faces and sample text remain accessible."
+        "description": "System file-backed font metadata retains all faces, resources and sample text without application total gates.",
+        "description_zh": "系统基于文件读取字体元数据，不以应用总量门槛截掉字体面、资源或样本文本。"
       },
       "sample_chars": {
         "value": null,
         "type": "usize",
         "unit": "characters",
         "effect": "unlimited",
-        "description": "System font metadata is loaded from the file; all faces and sample text remain accessible."
+        "description": "System file-backed font metadata retains all faces, resources and sample text without application total gates.",
+        "description_zh": "系统基于文件读取字体元数据，不以应用总量门槛截掉字体面、资源或样本文本。"
       }
     },
     "playlist": {
@@ -211,7 +246,8 @@
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Playlist rows are virtualized; no application total-file-count gate."
+        "description": "Virtualized playlist rows retain every eligible file; no application file-count gate.",
+        "description_zh": "虚拟化播放列表保留所有符合条件的文件，不设应用文件总数门槛。"
       }
     },
     "mkv": {
@@ -220,77 +256,88 @@
         "type": "u64",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate."
+        "description": "Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate.",
+        "description_zh": "从磁盘读取帧、用磁盘索引时间戳，并在可取消的辅助进程中为所选播放项写入碎片化 MP4；不设置总大小、总数量或总时长门槛。"
       },
       "input_bytes": {
         "value": null,
         "type": "u64",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate."
+        "description": "Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate.",
+        "description_zh": "从磁盘读取帧、用磁盘索引时间戳，并在可取消的辅助进程中为所选播放项写入碎片化 MP4；不设置总大小、总数量或总时长门槛。"
       },
       "frame_bytes": {
         "value": 16777216,
         "type": "usize",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Active compressed frame/codec-metadata allocation budget, independent of the movie size."
+        "description": "One active compressed-frame/codec-metadata allocation budget, independent of movie size; original file bytes remain accessible.",
+        "description_zh": "单个活动压缩帧／编解码元数据的分配预算，与影片总大小无关，原始文件字节仍可访问。"
       },
       "frames": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate."
+        "description": "Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate.",
+        "description_zh": "从磁盘读取帧、用磁盘索引时间戳，并在可取消的辅助进程中为所选播放项写入碎片化 MP4；不设置总大小、总数量或总时长门槛。"
       },
       "parser_read_bytes": {
         "value": 2147483648,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Per-progress parser allowance, reset after each frame; optional seek indexes are skipped without loading them. Not a cumulative movie-length limit."
+        "description": "Parser work allowance resets after each frame, not cumulatively across the movie; optional seek metadata is skipped in a streaming pass.",
+        "description_zh": "解析工作预算在每帧后重置，不累计限制影片总量；可选定位元数据通过流式扫描跳过。"
       },
       "parser_operations": {
         "value": 20000000,
         "type": "u64",
         "unit": "operations",
         "effect": "budget",
-        "description": "Per-progress parser allowance, reset after each frame; optional seek indexes are skipped without loading them. Not a cumulative movie-length limit."
+        "description": "Parser work allowance resets after each frame, not cumulatively across the movie; optional seek metadata is skipped in a streaming pass.",
+        "description_zh": "解析工作预算在每帧后重置，不累计限制影片总量；可选定位元数据通过流式扫描跳过。"
       },
       "tracks": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate."
+        "description": "Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate.",
+        "description_zh": "从磁盘读取帧、用磁盘索引时间戳，并在可取消的辅助进程中为所选播放项写入碎片化 MP4；不设置总大小、总数量或总时长门槛。"
       },
       "duration_seconds": {
         "value": null,
         "type": "u64",
         "unit": "seconds",
         "effect": "unlimited",
-        "description": "Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate."
+        "description": "Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate.",
+        "description_zh": "从磁盘读取帧、用磁盘索引时间戳，并在可取消的辅助进程中为所选播放项写入碎片化 MP4；不设置总大小、总数量或总时长门槛。"
       },
       "nal_units": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate."
+        "description": "Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate.",
+        "description_zh": "从磁盘读取帧、用磁盘索引时间戳，并在可取消的辅助进程中为所选播放项写入碎片化 MP4；不设置总大小、总数量或总时长门槛。"
       },
       "nesting": {
         "value": 16,
         "type": "usize",
         "unit": "levels",
         "effect": "budget",
-        "description": "Parser stack budget for track metadata; optional chapters/tags/cues are skipped in a streaming pass."
+        "description": "Track-metadata parser stack budget; optional chapters/tags/cues are skipped, and file-byte inspection remains available.",
+        "description_zh": "轨道元数据解析栈预算；跳过可选章节、标签和定位索引，完整文件字节检查仍可用。"
       },
       "elements": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Read source frames from disk, index timestamps in a disk-backed database, and write fragmented MP4. Prepare only the selected playlist item in a cancellable helper; no total size/count/duration gate."
+        "description": "Read frames from disk, index timestamps on disk and write fragmented MP4 for the selected playlist item in a cancellable helper; no total size/count/duration gate.",
+        "description_zh": "从磁盘读取帧、用磁盘索引时间戳，并在可取消的辅助进程中为所选播放项写入碎片化 MP4；不设置总大小、总数量或总时长门槛。"
       }
     },
     "json": {
@@ -299,42 +346,48 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "fallback",
-        "description": "Structured-tree working budget. Complete content remains accessible and editable in Source, using pages for large files."
+        "description": "Structured-tree working budget; Source retains the complete editable document, with pages for large files.",
+        "description_zh": "结构树工作预算；源码保留完整可编辑文档，大文件使用分页。"
       },
       "field_chars": {
         "value": 512,
         "type": "usize",
         "unit": "characters",
         "effect": "budget",
-        "description": "Tree-label summary only. Expand containers or double-click a field to inspect the complete key/value; Source preserves full content."
+        "description": "Tree-label summary only; expand containers or double-click to inspect the complete key/value. Source retains all content.",
+        "description_zh": "仅控制树标签摘要；展开容器或双击查看完整键／值，源码保留全部内容。"
       },
       "nodes": {
         "value": 250000,
         "type": "usize",
         "unit": "items",
         "effect": "fallback",
-        "description": "Structured-tree working budget. Complete content remains accessible and editable in Source, using pages for large files."
+        "description": "Structured-tree working budget; Source retains the complete editable document, with pages for large files.",
+        "description_zh": "结构树工作预算；源码保留完整可编辑文档，大文件使用分页。"
       },
       "description_chars": {
         "value": 80,
         "type": "usize",
         "unit": "characters",
         "effect": "budget",
-        "description": "Tree-label summary only. Expand containers or double-click a field to inspect the complete key/value; Source preserves full content."
+        "description": "Tree-label summary only; expand containers or double-click to inspect the complete key/value. Source retains all content.",
+        "description_zh": "仅控制树标签摘要；展开容器或双击查看完整键／值，源码保留全部内容。"
       },
       "array_summary_chars": {
         "value": 120,
         "type": "usize",
         "unit": "characters",
         "effect": "budget",
-        "description": "Tree-label summary only. Expand containers or double-click a field to inspect the complete key/value; Source preserves full content."
+        "description": "Tree-label summary only; expand containers or double-click to inspect the complete key/value. Source retains all content.",
+        "description_zh": "仅控制树标签摘要；展开容器或双击查看完整键／值，源码保留全部内容。"
       },
       "auto_expand_children": {
         "value": 16,
         "type": "usize",
         "unit": "items",
         "effect": "budget",
-        "description": "json: auto expand children"
+        "description": "Initial auto-expansion policy only; collapsed children can still be expanded explicitly.",
+        "description_zh": "仅控制初始自动展开，折叠的子项仍可手动展开。"
       }
     },
     "csv": {
@@ -343,86 +396,98 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Active page and individual record decoding budget; not a total file-size gate. Oversized individual records remain accessible in the editable Source pages."
+        "description": "Active page/record decoding memory, not a total-file gate. Oversized individual records remain accessible in editable Source pages.",
+        "description_zh": "当前页／记录解码内存预算，不是文件总大小门槛。过大的单条记录仍可通过可编辑源码分页完整访问。"
       },
       "rows": {
         "value": 100000,
         "type": "usize",
         "unit": "items",
         "effect": "page",
-        "description": "Active table page/window budget. Row and column navigation expose the remaining records."
+        "description": "Active table page/window size; row and column navigation exposes the remaining records.",
+        "description_zh": "当前表格页／窗口大小，行列导航可访问其余全部记录。"
       },
       "columns": {
         "value": 256,
         "type": "usize",
         "unit": "items",
         "effect": "page",
-        "description": "Active table page/window budget. Row and column navigation expose the remaining records."
+        "description": "Active table page/window size; row and column navigation exposes the remaining records.",
+        "description_zh": "当前表格页／窗口大小，行列导航可访问其余全部记录。"
       },
       "cells": {
         "value": 1000000,
         "type": "usize",
         "unit": "items",
         "effect": "page",
-        "description": "Active table page/window budget. Row and column navigation expose the remaining records."
+        "description": "Active table page/window size; row and column navigation exposes the remaining records.",
+        "description_zh": "当前表格页／窗口大小，行列导航可访问其余全部记录。"
       },
       "cell_chars": {
         "value": 4096,
         "type": "usize",
         "unit": "characters",
         "effect": "budget",
-        "description": "Visible cell excerpt; double-click displays the complete current cell in a selectable read-only editor."
+        "description": "Visible single-line cell excerpt; double-click retains the complete value and uses paged viewing for large values.",
+        "description_zh": "可见单行单元格摘要；双击保留完整值，较大值使用分页查看。"
       }
     },
     "spreadsheet": {
       "sheets": {
-        "value": 128,
+        "value": null,
         "type": "usize",
         "unit": "items",
-        "effect": "truncate",
-        "description": "spreadsheet: sheets"
+        "effect": "unlimited",
+        "description": "XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap.",
+        "description_zh": "XLSX 单元格、工作表名称和已保存公式流式写入磁盘索引，值可分页查看；取消输入、工作表、行列、单元格和 HTML 总量门槛。旧版 XLS 及超出单条 XML 工作预算的情况使用无应用大小门槛的系统原生预览。"
       },
       "rows": {
-        "value": 5000,
+        "value": null,
         "type": "usize",
         "unit": "items",
-        "effect": "truncate",
-        "description": "spreadsheet: rows"
+        "effect": "unlimited",
+        "description": "XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap.",
+        "description_zh": "XLSX 单元格、工作表名称和已保存公式流式写入磁盘索引，值可分页查看；取消输入、工作表、行列、单元格和 HTML 总量门槛。旧版 XLS 及超出单条 XML 工作预算的情况使用无应用大小门槛的系统原生预览。"
       },
       "columns": {
-        "value": 256,
+        "value": null,
         "type": "usize",
         "unit": "items",
-        "effect": "truncate",
-        "description": "spreadsheet: columns"
+        "effect": "unlimited",
+        "description": "XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap.",
+        "description_zh": "XLSX 单元格、工作表名称和已保存公式流式写入磁盘索引，值可分页查看；取消输入、工作表、行列、单元格和 HTML 总量门槛。旧版 XLS 及超出单条 XML 工作预算的情况使用无应用大小门槛的系统原生预览。"
       },
       "cell_chars": {
-        "value": 4096,
+        "value": null,
         "type": "usize",
         "unit": "characters",
-        "effect": "truncate",
-        "description": "spreadsheet: cell chars"
+        "effect": "unlimited",
+        "description": "XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap.",
+        "description_zh": "XLSX 单元格、工作表名称和已保存公式流式写入磁盘索引，值可分页查看；取消输入、工作表、行列、单元格和 HTML 总量门槛。旧版 XLS 及超出单条 XML 工作预算的情况使用无应用大小门槛的系统原生预览。"
       },
       "input_bytes": {
-        "value": 134217728,
+        "value": null,
         "type": "u64",
         "unit": "bytes",
-        "effect": "reject",
-        "description": "spreadsheet: input bytes"
+        "effect": "unlimited",
+        "description": "XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap.",
+        "description_zh": "XLSX 单元格、工作表名称和已保存公式流式写入磁盘索引，值可分页查看；取消输入、工作表、行列、单元格和 HTML 总量门槛。旧版 XLS 及超出单条 XML 工作预算的情况使用无应用大小门槛的系统原生预览。"
       },
       "sheet_text_bytes": {
-        "value": 33554432,
+        "value": null,
         "type": "usize",
         "unit": "bytes",
-        "effect": "budget",
-        "description": "spreadsheet: sheet text bytes"
+        "effect": "unlimited",
+        "description": "XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap.",
+        "description_zh": "XLSX 单元格、工作表名称和已保存公式流式写入磁盘索引，值可分页查看；取消输入、工作表、行列、单元格和 HTML 总量门槛。旧版 XLS 及超出单条 XML 工作预算的情况使用无应用大小门槛的系统原生预览。"
       },
       "html_bytes": {
-        "value": 67108864,
+        "value": null,
         "type": "usize",
         "unit": "bytes",
-        "effect": "budget",
-        "description": "spreadsheet: html bytes"
+        "effect": "unlimited",
+        "description": "XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap.",
+        "description_zh": "XLSX 单元格、工作表名称和已保存公式流式写入磁盘索引，值可分页查看；取消输入、工作表、行列、单元格和 HTML 总量门槛。旧版 XLS 及超出单条 XML 工作预算的情况使用无应用大小门槛的系统原生预览。"
       }
     },
     "xmind": {
@@ -431,32 +496,32 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "fallback",
-        "description": "Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages.",
-        "description_zh": "交互式思维导图的工作预算。超出后改为完整 content.json/content.xml 分页，按需解压并支持取消，不丢弃内容。"
+        "description": "Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression.",
+        "description_zh": "思维导图工作预算；超出（包括解析栈预算耗尽）后，以可取消的按需解压分页打开完整 content.json/content.xml。"
       },
       "nesting": {
         "value": 64,
         "type": "usize",
         "unit": "levels",
         "effect": "fallback",
-        "description": "Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages.",
-        "description_zh": "交互式思维导图的工作预算。超出后改为完整 content.json/content.xml 分页，按需解压并支持取消，不丢弃内容。"
+        "description": "Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression.",
+        "description_zh": "思维导图工作预算；超出（包括解析栈预算耗尽）后，以可取消的按需解压分页打开完整 content.json/content.xml。"
       },
       "content_bytes": {
         "value": 16777216,
         "type": "u64",
         "unit": "bytes",
         "effect": "fallback",
-        "description": "Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages.",
-        "description_zh": "交互式思维导图的工作预算。超出后改为完整 content.json/content.xml 分页，按需解压并支持取消，不丢弃内容。"
+        "description": "Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression.",
+        "description_zh": "思维导图工作预算；超出（包括解析栈预算耗尽）后，以可取消的按需解压分页打开完整 content.json/content.xml。"
       },
       "topics": {
         "value": 10000,
         "type": "usize",
         "unit": "items",
         "effect": "fallback",
-        "description": "Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages.",
-        "description_zh": "交互式思维导图的工作预算。超出后改为完整 content.json/content.xml 分页，按需解压并支持取消，不丢弃内容。"
+        "description": "Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression.",
+        "description_zh": "思维导图工作预算；超出（包括解析栈预算耗尽）后，以可取消的按需解压分页打开完整 content.json/content.xml。"
       },
       "input_bytes": {
         "value": null,
@@ -479,64 +544,64 @@
         "type": "usize",
         "unit": "items",
         "effect": "fallback",
-        "description": "Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages.",
-        "description_zh": "交互式思维导图的工作预算。超出后改为完整 content.json/content.xml 分页，按需解压并支持取消，不丢弃内容。"
+        "description": "Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression.",
+        "description_zh": "思维导图工作预算；超出（包括解析栈预算耗尽）后，以可取消的按需解压分页打开完整 content.json/content.xml。"
       },
       "relationships": {
         "value": 10000,
         "type": "usize",
         "unit": "items",
         "effect": "fallback",
-        "description": "Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages.",
-        "description_zh": "交互式思维导图的工作预算。超出后改为完整 content.json/content.xml 分页，按需解压并支持取消，不丢弃内容。"
+        "description": "Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression.",
+        "description_zh": "思维导图工作预算；超出（包括解析栈预算耗尽）后，以可取消的按需解压分页打开完整 content.json/content.xml。"
       },
       "note_bytes": {
         "value": 65536,
         "type": "usize",
         "unit": "bytes",
         "effect": "fallback",
-        "description": "Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages.",
-        "description_zh": "交互式思维导图的工作预算。超出后改为完整 content.json/content.xml 分页，按需解压并支持取消，不丢弃内容。"
+        "description": "Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression.",
+        "description_zh": "思维导图工作预算；超出（包括解析栈预算耗尽）后，以可取消的按需解压分页打开完整 content.json/content.xml。"
       },
       "labels": {
         "value": 128,
         "type": "usize",
         "unit": "items",
         "effect": "fallback",
-        "description": "Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages.",
-        "description_zh": "交互式思维导图的工作预算。超出后改为完整 content.json/content.xml 分页，按需解压并支持取消，不丢弃内容。"
+        "description": "Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression.",
+        "description_zh": "思维导图工作预算；超出（包括解析栈预算耗尽）后，以可取消的按需解压分页打开完整 content.json/content.xml。"
       },
       "xml_nodes": {
         "value": 200000,
         "type": "usize",
         "unit": "items",
         "effect": "fallback",
-        "description": "Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages.",
-        "description_zh": "交互式思维导图的工作预算。超出后改为完整 content.json/content.xml 分页，按需解压并支持取消，不丢弃内容。"
+        "description": "Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression.",
+        "description_zh": "思维导图工作预算；超出（包括解析栈预算耗尽）后，以可取消的按需解压分页打开完整 content.json/content.xml。"
       },
       "xml_nesting": {
         "value": 256,
         "type": "usize",
         "unit": "levels",
         "effect": "fallback",
-        "description": "Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages.",
-        "description_zh": "交互式思维导图的工作预算。超出后改为完整 content.json/content.xml 分页，按需解压并支持取消，不丢弃内容。"
+        "description": "Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression.",
+        "description_zh": "思维导图工作预算；超出（包括解析栈预算耗尽）后，以可取消的按需解压分页打开完整 content.json/content.xml。"
       },
       "link_bytes": {
         "value": 16384,
         "type": "usize",
         "unit": "bytes",
         "effect": "fallback",
-        "description": "Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages.",
-        "description_zh": "交互式思维导图的工作预算。超出后改为完整 content.json/content.xml 分页，按需解压并支持取消，不丢弃内容。"
+        "description": "Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression.",
+        "description_zh": "思维导图工作预算；超出（包括解析栈预算耗尽）后，以可取消的按需解压分页打开完整 content.json/content.xml。"
       },
       "labels_bytes": {
         "value": 16384,
         "type": "usize",
         "unit": "bytes",
         "effect": "fallback",
-        "description": "Interactive mind-map working budget. When exceeded, complete content.json/content.xml remains accessible through cancellable, on-demand decompressed pages.",
-        "description_zh": "交互式思维导图的工作预算。超出后改为完整 content.json/content.xml 分页，按需解压并支持取消，不丢弃内容。"
+        "description": "Mind-map working budget. Exceeding it, including parser stack exhaustion, opens complete content.json/content.xml pages with cancellable on-demand decompression.",
+        "description_zh": "思维导图工作预算；超出（包括解析栈预算耗尽）后，以可取消的按需解压分页打开完整 content.json/content.xml。"
       }
     },
     "archive": {
@@ -545,14 +610,16 @@
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Enumerate and spool every entry to disk; the UI reads bounded pages."
+        "description": "Enumerate all entries and spool the report for bounded page display; no total entry-count gate.",
+        "description_zh": "枚举全部条目并落盘生成报告，界面按有界页面读取，不设置条目总数门槛。"
       },
       "bytes": {
         "value": 33554432,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Small-document XML parsing buffer; larger content is streamed in full to a paged text view."
+        "description": "Structured XML projection working buffer; larger content streams in full into the paged source report.",
+        "description_zh": "结构化 XML 投影的工作缓冲预算，较大内容完整流式写入分页源码报告。"
       }
     },
     "numpy": {
@@ -561,14 +628,16 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Metadata interpretation window; the complete header remains available in the generated paged report."
+        "description": "Header string-token working buffer. Scan fields across the complete streamed header; preserve all header bytes and all supported numeric values in the paged report.",
+        "description_zh": "头部字符串 token 的工作缓冲预算；字段扫描覆盖完整流式头部，分页报告保留完整头部及支持类型的全部数值。"
       },
       "values": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Numeric values stream to a disk-backed paged report; no prefix-only preview."
+        "description": "Supported numeric values stream to a disk-backed paged report; no prefix-only value count.",
+        "description_zh": "支持类型的数值流式写入磁盘分页报告，不再只保留前缀数量。"
       }
     },
     "geometry": {
@@ -577,32 +646,32 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "fallback",
-        "description": "Static projection working budget; oversized projections open complete source pages instead of rejecting or silently truncating the file.",
-        "description_zh": "静态投影的工作预算；超出后打开完整源文件分页，不拒绝文件，也不静默截断内容。"
+        "description": "Static mesh projection working budget; larger projections open complete source/hex pages rather than rejecting or silently cutting the file.",
+        "description_zh": "静态网格投影工作预算；较大投影改为完整源码／十六进制分页，不拒绝或静默截掉文件。"
       },
       "vertices": {
         "value": 100000,
         "type": "usize",
         "unit": "items",
         "effect": "fallback",
-        "description": "Static projection working budget; oversized projections open complete source pages instead of rejecting or silently truncating the file.",
-        "description_zh": "静态投影的工作预算；超出后打开完整源文件分页，不拒绝文件，也不静默截断内容。"
+        "description": "Static mesh projection working budget; larger projections open complete source/hex pages rather than rejecting or silently cutting the file.",
+        "description_zh": "静态网格投影工作预算；较大投影改为完整源码／十六进制分页，不拒绝或静默截掉文件。"
       },
       "faces": {
         "value": 100000,
         "type": "usize",
         "unit": "items",
         "effect": "fallback",
-        "description": "Static projection working budget; oversized projections open complete source pages instead of rejecting or silently truncating the file.",
-        "description_zh": "静态投影的工作预算；超出后打开完整源文件分页，不拒绝文件，也不静默截断内容。"
+        "description": "Static mesh projection working budget; larger projections open complete source/hex pages rather than rejecting or silently cutting the file.",
+        "description_zh": "静态网格投影工作预算；较大投影改为完整源码／十六进制分页，不拒绝或静默截掉文件。"
       },
       "polygon_vertices": {
         "value": 256,
         "type": "usize",
         "unit": "items",
         "effect": "fallback",
-        "description": "Static projection working budget; oversized projections open complete source pages instead of rejecting or silently truncating the file.",
-        "description_zh": "静态投影的工作预算；超出后打开完整源文件分页，不拒绝文件，也不静默截断内容。"
+        "description": "Static mesh projection working budget; larger projections open complete source/hex pages rather than rejecting or silently cutting the file.",
+        "description_zh": "静态网格投影工作预算；较大投影改为完整源码／十六进制分页，不拒绝或静默截掉文件。"
       }
     },
     "bdf": {
@@ -611,16 +680,16 @@
         "type": "usize",
         "unit": "pixels",
         "effect": "fallback",
-        "description": "Static projection working budget; oversized projections open complete source pages instead of rejecting or silently truncating the file.",
-        "description_zh": "静态投影的工作预算；超出后打开完整源文件分页，不拒绝文件，也不静默截断内容。"
+        "description": "Bitmap-font projection working budget; beyond it, complete BDF source pages remain available instead of a silently shortened glyph list.",
+        "description_zh": "位图字体投影工作预算；超出后仍提供完整 BDF 源码分页，不静默缩短字形列表。"
       },
       "glyphs": {
         "value": 64,
         "type": "usize",
         "unit": "items",
         "effect": "fallback",
-        "description": "Static projection working budget; oversized projections open complete source pages instead of rejecting or silently truncating the file.",
-        "description_zh": "静态投影的工作预算；超出后打开完整源文件分页，不拒绝文件，也不静默截断内容。"
+        "description": "Bitmap-font projection working budget; beyond it, complete BDF source pages remain available instead of a silently shortened glyph list.",
+        "description_zh": "位图字体投影工作预算；超出后仍提供完整 BDF 源码分页，不静默缩短字形列表。"
       }
     },
     "executable": {
@@ -629,70 +698,80 @@
         "type": "u64",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging."
+        "description": "No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff.",
+        "description_zh": "不设文件、名称、条目数或报告总量门槛。元数据读取使用 io.cache_bytes 工作缓存并落盘生成报告；缓存预算耗尽时打开完整文件字节分页。CString 不采用库内的前缀截取。"
       },
       "name_chars": {
         "value": null,
         "type": "usize",
         "unit": "characters",
         "effect": "unlimited",
-        "description": "Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging."
+        "description": "No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff.",
+        "description_zh": "不设文件、名称、条目数或报告总量门槛。元数据读取使用 io.cache_bytes 工作缓存并落盘生成报告；缓存预算耗尽时打开完整文件字节分页。CString 不采用库内的前缀截取。"
       },
       "architectures": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging."
+        "description": "No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff.",
+        "description_zh": "不设文件、名称、条目数或报告总量门槛。元数据读取使用 io.cache_bytes 工作缓存并落盘生成报告；缓存预算耗尽时打开完整文件字节分页。CString 不采用库内的前缀截取。"
       },
       "hex_bytes": {
         "value": 4096,
         "type": "usize",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Hex excerpt in the metadata report; file bytes remain accessible through the paged raw view."
+        "description": "Hex excerpt within the metadata report; complete file bytes remain accessible through raw paging.",
+        "description_zh": "元数据报告中的十六进制摘要，完整文件字节仍可通过原始字节分页访问。"
       },
       "segments": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging."
+        "description": "No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff.",
+        "description_zh": "不设文件、名称、条目数或报告总量门槛。元数据读取使用 io.cache_bytes 工作缓存并落盘生成报告；缓存预算耗尽时打开完整文件字节分页。CString 不采用库内的前缀截取。"
       },
       "sections": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging."
+        "description": "No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff.",
+        "description_zh": "不设文件、名称、条目数或报告总量门槛。元数据读取使用 io.cache_bytes 工作缓存并落盘生成报告；缓存预算耗尽时打开完整文件字节分页。CString 不采用库内的前缀截取。"
       },
       "report_bytes": {
         "value": null,
         "type": "usize",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging."
+        "description": "No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff.",
+        "description_zh": "不设文件、名称、条目数或报告总量门槛。元数据读取使用 io.cache_bytes 工作缓存并落盘生成报告；缓存预算耗尽时打开完整文件字节分页。CString 不采用库内的前缀截取。"
       },
       "libraries": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging."
+        "description": "No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff.",
+        "description_zh": "不设文件、名称、条目数或报告总量门槛。元数据读取使用 io.cache_bytes 工作缓存并落盘生成报告；缓存预算耗尽时打开完整文件字节分页。CString 不采用库内的前缀截取。"
       },
       "dynamic_entries": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging."
+        "description": "No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff.",
+        "description_zh": "不设文件、名称、条目数或报告总量门槛。元数据读取使用 io.cache_bytes 工作缓存并落盘生成报告；缓存预算耗尽时打开完整文件字节分页。CString 不采用库内的前缀截取。"
       },
       "name_scan_bytes": {
         "value": null,
         "type": "usize",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Executable headers are read on demand through ReadCache and the complete report is spooled to disk for paging."
+        "description": "No file/name/count/report total gate. Read metadata through the io.cache_bytes working cache and spool reports; cache exhaustion opens complete file-byte pages. CString scans do not use the library prefix cutoff.",
+        "description_zh": "不设文件、名称、条目数或报告总量门槛。元数据读取使用 io.cache_bytes 工作缓存并落盘生成报告；缓存预算耗尽时打开完整文件字节分页。CString 不采用库内的前缀截取。"
       }
     },
     "tensor": {
@@ -701,63 +780,72 @@
         "type": "u64",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded."
+        "description": "Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate.",
+        "description_zh": "元数据记录及 dtype 计数流式落盘；过大的单条记录改为完整头部分页，不读取张量权重。不设置头部、名称、形状、条目数量或报告总量门槛。"
       },
       "rows": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded."
+        "description": "Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate.",
+        "description_zh": "元数据记录及 dtype 计数流式落盘；过大的单条记录改为完整头部分页，不读取张量权重。不设置头部、名称、形状、条目数量或报告总量门槛。"
       },
       "report_bytes": {
         "value": null,
         "type": "usize",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded."
+        "description": "Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate.",
+        "description_zh": "元数据记录及 dtype 计数流式落盘；过大的单条记录改为完整头部分页，不读取张量权重。不设置头部、名称、形状、条目数量或报告总量门槛。"
       },
       "shape_dimensions": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded."
+        "description": "Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate.",
+        "description_zh": "元数据记录及 dtype 计数流式落盘；过大的单条记录改为完整头部分页，不读取张量权重。不设置头部、名称、形状、条目数量或报告总量门槛。"
       },
       "metadata_entries": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded."
+        "description": "Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate.",
+        "description_zh": "元数据记录及 dtype 计数流式落盘；过大的单条记录改为完整头部分页，不读取张量权重。不设置头部、名称、形状、条目数量或报告总量门槛。"
       },
       "name_chars": {
         "value": null,
         "type": "usize",
         "unit": "characters",
         "effect": "unlimited",
-        "description": "Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded."
+        "description": "Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate.",
+        "description_zh": "元数据记录及 dtype 计数流式落盘；过大的单条记录改为完整头部分页，不读取张量权重。不设置头部、名称、形状、条目数量或报告总量门槛。"
       },
       "dtype_chars": {
         "value": null,
         "type": "usize",
         "unit": "characters",
         "effect": "unlimited",
-        "description": "Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded."
+        "description": "Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate.",
+        "description_zh": "元数据记录及 dtype 计数流式落盘；过大的单条记录改为完整头部分页，不读取张量权重。不设置头部、名称、形状、条目数量或报告总量门槛。"
       },
       "metadata_key_chars": {
         "value": null,
         "type": "usize",
         "unit": "characters",
         "effect": "unlimited",
-        "description": "Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded."
+        "description": "Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate.",
+        "description_zh": "元数据记录及 dtype 计数流式落盘；过大的单条记录改为完整头部分页，不读取张量权重。不设置头部、名称、形状、条目数量或报告总量门槛。"
       },
       "metadata_value_chars": {
         "value": null,
         "type": "usize",
         "unit": "characters",
         "effect": "unlimited",
-        "description": "Stream tensor header entries to a disk-backed report; retain complete names, metadata, shapes and rows. Tensor payloads are not loaded."
+        "description": "Stream metadata records and dtype counts to disk. Oversized individual records use complete header pages without loading tensor weights. No header/name/shape/count/report total gate.",
+        "description_zh": "元数据记录及 dtype 计数流式落盘；过大的单条记录改为完整头部分页，不读取张量权重。不设置头部、名称、形状、条目数量或报告总量门槛。"
       }
     },
     "sqlite": {
@@ -766,77 +854,88 @@
         "type": "u64",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "The snapshot copies in fixed-size blocks, without a total database size gate."
+        "description": "Copy the snapshot in fixed-size blocks, without an application database total-size gate.",
+        "description_zh": "按固定大小缓冲块复制快照，不设置应用数据库总大小门槛。"
       },
       "page_rows": {
         "value": 500,
         "type": "usize",
         "unit": "rows",
-        "effect": "budget",
-        "description": "sqlite: page rows"
+        "effect": "page",
+        "description": "Rows per table/schema page; previous/next controls expose all remaining rows.",
+        "description_zh": "表格／结构每页行数，上一页／下一页可访问其余全部行。"
       },
       "tables": {
         "value": 5000,
         "type": "usize",
         "unit": "items",
         "effect": "page",
-        "description": "Column/catalog page size with explicit navigation to remaining items."
+        "description": "Catalog/column page size with explicit continuation to the remaining entries.",
+        "description_zh": "目录／列的分页大小，有明确入口继续访问剩余条目。"
       },
       "columns": {
         "value": 256,
         "type": "usize",
         "unit": "columns",
         "effect": "page",
-        "description": "Column/catalog page size with explicit navigation to remaining items."
+        "description": "Catalog/column page size with explicit continuation to the remaining entries.",
+        "description_zh": "目录／列的分页大小，有明确入口继续访问剩余条目。"
       },
       "value_bytes": {
         "value": null,
         "type": "i32",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Retain native SQLite format limits; full values and definitions load on explicit request."
+        "description": "Use native SQLite format constraints; full values and definitions are read in text.page_bytes windows with previous/next navigation.",
+        "description_zh": "沿用原生 SQLite 格式约束；完整值及定义按 text.page_bytes 的窗口读取，并提供上一页／下一页。"
       },
       "text_bytes": {
         "value": 512,
         "type": "usize",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Cell summary only; double-click loads the complete value (BLOB shown as hex)."
+        "description": "Visible cell summary only; double-click opens a complete paged value, with binary values shown as hex.",
+        "description_zh": "仅控制单元格摘要；双击打开完整值分页，二进制值以十六进制显示。"
       },
       "schema_text_bytes": {
         "value": null,
         "type": "usize",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Retain native SQLite format limits; full values and definitions load on explicit request."
+        "description": "Use native SQLite format constraints; full values and definitions are read in text.page_bytes windows with previous/next navigation.",
+        "description_zh": "沿用原生 SQLite 格式约束；完整值及定义按 text.page_bytes 的窗口读取，并提供上一页／下一页。"
       },
       "blob_bytes": {
         "value": 16,
         "type": "usize",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Cell summary only; double-click loads the complete value (BLOB shown as hex)."
+        "description": "Visible cell summary only; double-click opens a complete paged value, with binary values shown as hex.",
+        "description_zh": "仅控制单元格摘要；双击打开完整值分页，二进制值以十六进制显示。"
       },
       "query_seconds": {
         "value": 5,
         "type": "u64",
         "unit": "seconds",
         "effect": "timeout",
-        "description": "Initial query allowance; Retry with more time extends it explicitly instead of imposing a permanent timeout."
+        "description": "Initial cancellable query time allowance; Retry with more time explicitly extends it.",
+        "description_zh": "初始可取消查询时间预算，“延长时间重试”可明确增加预算。"
       },
       "busy_milliseconds": {
         "value": 1000,
         "type": "i32",
         "unit": "milliseconds",
         "effect": "timeout",
-        "description": "sqlite: busy milliseconds"
+        "description": "Native SQLite lock-wait allowance; a busy database can be retried and is not rejected by file size.",
+        "description_zh": "原生 SQLite 锁等待时间；数据库忙碌时可重试，与文件大小无关。"
       },
       "cache_kib": {
         "value": 8192,
         "type": "i32",
         "unit": "KiB",
         "effect": "budget",
-        "description": "sqlite: cache kib"
+        "description": "SQLite page-cache working memory; larger databases read further pages from disk.",
+        "description_zh": "SQLite 页缓存工作内存，较大的数据库继续从磁盘读取页面。"
       }
     },
     "markup": {
@@ -845,7 +944,8 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Scan the current document text for picture/image references; large source documents already use bounded editor pages."
+        "description": "Scan the current text for image references; large documents use source pages instead of a total reference-scan cutoff.",
+        "description_zh": "扫描当前文本中的图片引用；大文档使用源码分页，不以引用扫描总量截掉后半部分。"
       }
     },
     "remote_image": {
@@ -854,156 +954,178 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "HTTP data streams into a temporary file; static previews decode bounded thumbnails and GIFs stream from the file."
+        "description": "HTTP downloads stream to a temporary file and prepare bounded thumbnails; source input size is not an application rejection gate.",
+        "description_zh": "HTTP 下载流式写入临时文件，再生成有界缩略图，不以源输入总大小拒绝文件。"
       },
       "timeout_seconds": {
         "value": 20,
         "type": "u64",
         "unit": "seconds",
         "effect": "timeout",
-        "description": "Idle/no-progress timeout; active downloads have no fixed total elapsed time cap."
+        "description": "Idle/no-progress timeout; active downloads have no fixed total elapsed-time ceiling.",
+        "description_zh": "空闲／无进度超时，持续有进度的下载不设固定总耗时上限。"
       },
       "first_attempt_seconds": {
         "value": 8,
         "type": "u64",
         "unit": "seconds",
         "effect": "timeout",
-        "description": "Connection allowance for the first raw GitHub URL before the API fallback."
+        "description": "Connection establishment allowance, including the first GitHub raw URL attempt before API fallback.",
+        "description_zh": "连接建立时间预算，包括 GitHub 原始 URL 首次尝试后转用 API 的连接等待。"
       },
       "svg_embedded_bytes": {
         "value": 67108864,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Per-embedded-image preview working memory; SVG images are processed individually instead of accumulating a document-wide rejection budget."
+        "description": "Per-embedded-image working memory in SVG preparation; original SVG content remains available through Source or file-byte access.",
+        "description_zh": "SVG 准备过程中单个内嵌图片的工作内存，原始 SVG 内容仍可通过源码或文件字节访问。"
       },
       "redirects": {
         "value": 5,
         "type": "usize",
         "unit": "items",
         "effect": "budget",
-        "description": "Redirect-chain budget prevents request loops; it does not constrain image size."
+        "description": "Redirect-chain budget prevents request loops; it does not constrain image-file size.",
+        "description_zh": "重定向链预算用于避免请求循环，不限制图片文件总大小。"
       },
       "connect_seconds": {
         "value": 8,
         "type": "u64",
         "unit": "seconds",
         "effect": "timeout",
-        "description": "remote image: connect seconds"
+        "description": "Connection establishment allowance, including the first GitHub raw URL attempt before API fallback.",
+        "description_zh": "连接建立时间预算，包括 GitHub 原始 URL 首次尝试后转用 API 的连接等待。"
       },
       "minimum_bytes_per_second": {
         "value": 1,
         "type": "u64",
         "unit": "bytes/second",
         "effect": "timeout",
-        "description": "Minimum progress used with the idle timeout; not a bandwidth ceiling."
+        "description": "Minimum progress for the idle timeout, not a bandwidth ceiling.",
+        "description_zh": "空闲超时使用的最低进度判定，不是带宽上限。"
       }
     },
     "diagram": {
       "blocks": {
-        "value": 128,
+        "value": 8,
         "type": "usize",
         "unit": "items",
-        "effect": "reject",
-        "description": "diagram: blocks"
+        "effect": "page",
+        "description": "Diagrams per active preview page. Previous/next controls expose the rest; switching pages releases the previous raster snapshot.",
+        "description_zh": "当前预览页的图表数量；上一页／下一页可访问全部图表，切页释放上一页的图片快照。"
       },
       "source_bytes": {
         "value": 262144,
         "type": "usize",
         "unit": "bytes",
-        "effect": "reject",
-        "description": "diagram: source bytes"
+        "effect": "fallback",
+        "description": "Per-diagram structured-render working budget; failures preserve the complete block source. Other diagram pages remain accessible.",
+        "description_zh": "单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图表页仍可访问。"
       },
       "svg_bytes": {
         "value": 8388608,
         "type": "usize",
         "unit": "bytes",
-        "effect": "reject",
-        "description": "diagram: svg bytes"
+        "effect": "fallback",
+        "description": "Per-diagram structured-render working budget; failures preserve the complete block source. Other diagram pages remain accessible.",
+        "description_zh": "单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图表页仍可访问。"
       },
       "aggregate_encoded_bytes": {
         "value": 67108864,
         "type": "usize",
         "unit": "bytes",
         "effect": "budget",
-        "description": "diagram: aggregate encoded bytes"
+        "description": "Encoded/decoded images retained for one active diagram page. Switching pages releases the prior raster snapshot; this is not a document total gate.",
+        "description_zh": "当前图表页保留的编码／解码图片预算；切页释放上一页图片快照，不限制文档图表总量。"
       },
       "aggregate_decoded_bytes": {
         "value": 134217728,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "diagram: aggregate decoded bytes"
+        "description": "Encoded/decoded images retained for one active diagram page. Switching pages releases the prior raster snapshot; this is not a document total gate.",
+        "description_zh": "当前图表页保留的编码／解码图片预算；切页释放上一页图片快照，不限制文档图表总量。"
       },
       "preview_edge": {
         "value": 2400,
         "type": "u32",
         "unit": "pixels",
-        "effect": "truncate",
-        "description": "diagram: preview edge"
+        "effect": "budget",
+        "description": "Active raster resolution/scale budget. Page raster dimensions also adapt to aggregate working memory, independently of document length.",
+        "description_zh": "当前图片的分辨率／缩放预算；每页图片尺寸还按聚合工作内存调整，与文档总长度无关。"
       },
       "startup_seconds": {
         "value": 15,
         "type": "u64",
         "unit": "seconds",
         "effect": "timeout",
-        "description": "diagram: startup seconds"
+        "description": "Cancellable renderer startup/per-block time allowance; an unfinished block shows its complete source instead of rejecting the Markdown document.",
+        "description_zh": "可取消的渲染器启动／单块时间预算；未完成图块显示完整源码，不拒绝整个 Markdown 文档。"
       },
       "block_seconds": {
         "value": 8,
         "type": "u64",
         "unit": "seconds",
         "effect": "timeout",
-        "description": "diagram: block seconds"
+        "description": "Cancellable renderer startup/per-block time allowance; an unfinished block shows its complete source instead of rejecting the Markdown document.",
+        "description_zh": "可取消的渲染器启动／单块时间预算；未完成图块显示完整源码，不拒绝整个 Markdown 文档。"
       },
       "ipc_bytes": {
         "value": 134217728,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "diagram: ipc bytes"
+        "description": "One page/request or one block IPC working buffer; document batches are paged and oversized render results preserve the complete source block.",
+        "description_zh": "一页请求或单图块的 IPC 工作缓冲预算；文档按页处理，过大的渲染结果保留完整图块源码。"
       },
       "slot_bytes": {
         "value": 16777216,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "diagram: slot bytes"
+        "description": "One page/request or one block IPC working buffer; document batches are paged and oversized render results preserve the complete source block.",
+        "description_zh": "一页请求或单图块的 IPC 工作缓冲预算；文档按页处理，过大的渲染结果保留完整图块源码。"
       },
       "max_upscale": {
         "value": 2,
         "type": "u32",
         "unit": "scale",
         "effect": "budget",
-        "description": "diagram: max upscale"
+        "description": "Active raster resolution/scale budget. Page raster dimensions also adapt to aggregate working memory, independently of document length.",
+        "description_zh": "当前图片的分辨率／缩放预算；每页图片尺寸还按聚合工作内存调整，与文档总长度无关。"
       },
       "request_bytes": {
         "value": 67108864,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "diagram: request bytes"
+        "description": "One page/request or one block IPC working buffer; document batches are paged and oversized render results preserve the complete source block.",
+        "description_zh": "一页请求或单图块的 IPC 工作缓冲预算；文档按页处理，过大的渲染结果保留完整图块源码。"
       },
       "message_bytes": {
         "value": 16781312,
         "type": "usize",
         "unit": "bytes",
         "effect": "budget",
-        "description": "diagram: message bytes"
+        "description": "One page/request or one block IPC working buffer; document batches are paged and oversized render results preserve the complete source block.",
+        "description_zh": "一页请求或单图块的 IPC 工作缓冲预算；文档按页处理，过大的渲染结果保留完整图块源码。"
       },
       "mermaid_edges": {
         "value": 1000,
         "type": "usize",
         "unit": "edges",
-        "effect": "reject",
-        "description": "diagram: mermaid edges"
+        "effect": "fallback",
+        "description": "Per-diagram structured-render working budget; failures preserve the complete block source. Other diagram pages remain accessible.",
+        "description_zh": "单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图表页仍可访问。"
       },
       "math_macros": {
         "value": 1000,
         "type": "usize",
         "unit": "expansions",
-        "effect": "reject",
-        "description": "diagram: math macros"
+        "effect": "budget",
+        "description": "Math interpreter expansion budget to bound recursive work; the complete formula source remains available when rendering cannot finish.",
+        "description_zh": "公式解释器的展开工作预算，控制递归工作量；无法完成渲染时仍保留完整公式源码。"
       }
     },
     "book": {
@@ -1011,120 +1133,137 @@
         "value": 4194304,
         "type": "u64",
         "unit": "bytes",
-        "effect": "reject",
-        "description": "book: chapter bytes"
+        "effect": "fallback",
+        "description": "Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off.",
+        "description_zh": "章节结构化排版工作预算。超出时保留章节导航并提供完整源码分页，支持的旧编码通过流式转码读取，不静默截掉章节。"
       },
       "xml_nodes": {
         "value": 250000,
         "type": "u32",
         "unit": "nodes",
-        "effect": "reject",
-        "description": "book: xml nodes"
+        "effect": "fallback",
+        "description": "Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off.",
+        "description_zh": "章节结构化排版工作预算。超出时保留章节导航并提供完整源码分页，支持的旧编码通过流式转码读取，不静默截掉章节。"
       },
       "resource_bytes": {
-        "value": 33554432,
+        "value": null,
         "type": "u64",
         "unit": "bytes",
-        "effect": "reject",
-        "description": "book: resource bytes"
+        "effect": "unlimited",
+        "description": "Requested archive images stream to a private file and use native thumbnail decoding; no source-resource byte or pixel-edge gate. Only the active chapter/page previews are retained.",
+        "description_zh": "所请求的包内图片流式写入私有临时文件，再由原生接口生成缩略图；不按资源字节总量或原图边长拒绝打开，仅保留当前章节／页面预览。"
       },
       "preview_edge": {
         "value": 2400,
         "type": "u32",
         "unit": "pixels",
-        "effect": "truncate",
-        "description": "book: preview edge"
+        "effect": "budget",
+        "description": "Thumbnail resolution for the requested illustration/comic page; this does not reject the original image.",
+        "description_zh": "当前插图／漫画页的缩略图分辨率，不以此拒绝原始图片。"
       },
       "input_bytes": {
-        "value": 268435456,
+        "value": null,
         "type": "u64",
         "unit": "bytes",
-        "effect": "reject",
-        "description": "book: input bytes"
+        "effect": "unlimited",
+        "description": "No application book/archive/chapter/catalog/metadata total gate. Structured parsing keeps a working budget; oversized metadata exposes every archive member as complete source or byte pages.",
+        "description_zh": "取消书籍、压缩包条目、章节、目录和元数据总量门槛。结构化解析保留工作预算；复杂元数据改为列出全部包内成员，提供完整源码或字节分页。"
       },
       "text_bytes": {
         "value": 67108864,
         "type": "u64",
         "unit": "bytes",
-        "effect": "reject",
-        "description": "book: text bytes"
+        "effect": "fallback",
+        "description": "Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off.",
+        "description_zh": "章节结构化排版工作预算。超出时保留章节导航并提供完整源码分页，支持的旧编码通过流式转码读取，不静默截掉章节。"
       },
       "archive_entries": {
-        "value": 20000,
+        "value": null,
         "type": "usize",
         "unit": "items",
-        "effect": "reject",
-        "description": "book: archive entries"
+        "effect": "unlimited",
+        "description": "No application book/archive/chapter/catalog/metadata total gate. Structured parsing keeps a working budget; oversized metadata exposes every archive member as complete source or byte pages.",
+        "description_zh": "取消书籍、压缩包条目、章节、目录和元数据总量门槛。结构化解析保留工作预算；复杂元数据改为列出全部包内成员，提供完整源码或字节分页。"
       },
       "chapters": {
-        "value": 2000,
+        "value": null,
         "type": "usize",
         "unit": "items",
-        "effect": "reject",
-        "description": "book: chapters"
+        "effect": "unlimited",
+        "description": "No application book/archive/chapter/catalog/metadata total gate. Structured parsing keeps a working budget; oversized metadata exposes every archive member as complete source or byte pages.",
+        "description_zh": "取消书籍、压缩包条目、章节、目录和元数据总量门槛。结构化解析保留工作预算；复杂元数据改为列出全部包内成员，提供完整源码或字节分页。"
       },
       "metadata_bytes": {
-        "value": 16384,
+        "value": null,
         "type": "usize",
         "unit": "bytes",
-        "effect": "reject",
-        "description": "book: metadata bytes"
+        "effect": "unlimited",
+        "description": "No application book/archive/chapter/catalog/metadata total gate. Structured parsing keeps a working budget; oversized metadata exposes every archive member as complete source or byte pages.",
+        "description_zh": "取消书籍、压缩包条目、章节、目录和元数据总量门槛。结构化解析保留工作预算；复杂元数据改为列出全部包内成员，提供完整源码或字节分页。"
       },
       "toc_entries": {
-        "value": 10000,
+        "value": null,
         "type": "usize",
         "unit": "items",
-        "effect": "reject",
-        "description": "book: toc entries"
+        "effect": "unlimited",
+        "description": "No application book/archive/chapter/catalog/metadata total gate. Structured parsing keeps a working budget; oversized metadata exposes every archive member as complete source or byte pages.",
+        "description_zh": "取消书籍、压缩包条目、章节、目录和元数据总量门槛。结构化解析保留工作预算；复杂元数据改为列出全部包内成员，提供完整源码或字节分页。"
       },
       "toc_depth": {
         "value": 32,
         "type": "usize",
         "unit": "levels",
-        "effect": "truncate",
-        "description": "book: toc depth"
+        "effect": "budget",
+        "description": "Visual TOC indentation only; retain all nested entries and their actual hierarchy depth instead of cutting the catalog.",
+        "description_zh": "仅控制目录的视觉缩进，保留全部嵌套条目及实际层级，不截掉目录。"
       },
       "fb2_depth": {
         "value": 64,
         "type": "usize",
         "unit": "levels",
-        "effect": "reject",
-        "description": "book: fb2 depth"
+        "effect": "fallback",
+        "description": "Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off.",
+        "description_zh": "章节结构化排版工作预算。超出时保留章节导航并提供完整源码分页，支持的旧编码通过流式转码读取，不静默截掉章节。"
       },
       "html_depth": {
         "value": 128,
         "type": "usize",
         "unit": "levels",
-        "effect": "reject",
-        "description": "book: html depth"
+        "effect": "fallback",
+        "description": "Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off.",
+        "description_zh": "章节结构化排版工作预算。超出时保留章节导航并提供完整源码分页，支持的旧编码通过流式转码读取，不静默截掉章节。"
       },
       "chapter_decoded_bytes": {
         "value": 134217728,
         "type": "u64",
         "unit": "bytes",
-        "effect": "budget",
-        "description": "book: chapter decoded bytes"
+        "effect": "fallback",
+        "description": "Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off.",
+        "description_zh": "章节结构化排版工作预算。超出时保留章节导航并提供完整源码分页，支持的旧编码通过流式转码读取，不静默截掉章节。"
       },
       "chapter_images": {
         "value": 128,
         "type": "usize",
         "unit": "items",
-        "effect": "reject",
-        "description": "book: chapter images"
+        "effect": "fallback",
+        "description": "Structured chapter working budget. When exceeded, retain chapter navigation and provide complete UTF-8 source pages, with streamed transcoding for supported legacy encodings. No chapter is silently cut off.",
+        "description_zh": "章节结构化排版工作预算。超出时保留章节导航并提供完整源码分页，支持的旧编码通过流式转码读取，不静默截掉章节。"
       },
       "image_decoded_bytes": {
-        "value": 134217728,
+        "value": null,
         "type": "u64",
         "unit": "bytes",
-        "effect": "budget",
-        "description": "book: image decoded bytes"
+        "effect": "unlimited",
+        "description": "Requested archive images stream to a private file and use native thumbnail decoding; no source-resource byte or pixel-edge gate. Only the active chapter/page previews are retained.",
+        "description_zh": "所请求的包内图片流式写入私有临时文件，再由原生接口生成缩略图；不按资源字节总量或原图边长拒绝打开，仅保留当前章节／页面预览。"
       },
       "image_edge": {
-        "value": 10000,
+        "value": null,
         "type": "u32",
         "unit": "pixels",
-        "effect": "reject",
-        "description": "book: image edge"
+        "effect": "unlimited",
+        "description": "Requested archive images stream to a private file and use native thumbnail decoding; no source-resource byte or pixel-edge gate. Only the active chapter/page previews are retained.",
+        "description_zh": "所请求的包内图片流式写入私有临时文件，再由原生接口生成缩略图；不按资源字节总量或原图边长拒绝打开，仅保留当前章节／页面预览。"
       }
     },
     "book_state": {
@@ -1133,28 +1272,32 @@
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "All bookmarks are persisted; no total bookmark count gate."
+        "description": "Persist all bookmarks, labels and reading-state entries; no application bookmark-count or input-size gate.",
+        "description_zh": "保存全部书签、标签和阅读状态记录，不设置应用书签总数或输入总大小门槛。"
       },
       "label_bytes": {
         "value": null,
         "type": "usize",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Persist complete bookmark labels without an arbitrary byte gate."
+        "description": "Persist all bookmarks, labels and reading-state entries; no application bookmark-count or input-size gate.",
+        "description_zh": "保存全部书签、标签和阅读状态记录，不设置应用书签总数或输入总大小门槛。"
       },
       "input_bytes": {
         "value": null,
         "type": "u64",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Reading-state JSON is streamed from disk without a total input-size gate."
+        "description": "Persist all bookmarks, labels and reading-state entries; no application bookmark-count or input-size gate.",
+        "description_zh": "保存全部书签、标签和阅读状态记录，不设置应用书签总数或输入总大小门槛。"
       },
       "label_chars": {
         "value": 120,
         "type": "usize",
         "unit": "characters",
         "effect": "budget",
-        "description": "Derived bookmark label excerpt; the complete chapter remains accessible at the bookmark location."
+        "description": "Derived bookmark/header/catalog label excerpt; chapter targets and full-metadata/text dialogs retain the complete content.",
+        "description_zh": "派生书签、书籍标题和目录标签摘要；章节目标及完整元数据／文本弹窗保留全部内容。"
       }
     },
     "geo": {
@@ -1162,8 +1305,9 @@
         "value": 10000,
         "type": "usize",
         "unit": "items",
-        "effect": "truncate",
-        "description": "geo: points"
+        "effect": "page",
+        "description": "Coordinates per table page; previous/next navigation covers all GPX/KML points and Source preserves the complete XML.",
+        "description_zh": "每页坐标数量；上一页／下一页可访问全部 GPX/KML 点，源码保留完整 XML。"
       }
     },
     "git": {
@@ -1172,56 +1316,64 @@
         "type": "u64",
         "unit": "bytes",
         "effect": "reject",
-        "description": "git: output bytes"
+        "description": "git: output bytes",
+        "description_zh": "Git 专项待处理：output bytes；本次保留原有数值和行为。"
       },
       "diff_output_bytes": {
         "value": 268435456,
         "type": "u64",
         "unit": "bytes",
         "effect": "reject",
-        "description": "git: diff output bytes"
+        "description": "git: diff output bytes",
+        "description_zh": "Git 专项待处理：diff output bytes；本次保留原有数值和行为。"
       },
       "stderr_bytes": {
         "value": 65536,
         "type": "u64",
         "unit": "bytes",
         "effect": "truncate",
-        "description": "git: stderr bytes"
+        "description": "git: stderr bytes",
+        "description_zh": "Git 专项待处理：stderr bytes；本次保留原有数值和行为。"
       },
       "error_chars": {
         "value": 16384,
         "type": "usize",
         "unit": "characters",
         "effect": "truncate",
-        "description": "git: error chars"
+        "description": "git: error chars",
+        "description_zh": "Git 专项待处理：error chars；本次保留原有数值和行为。"
       },
       "history_commits": {
         "value": 1000,
         "type": "usize",
         "unit": "items",
         "effect": "reject",
-        "description": "git: history commits"
+        "description": "git: history commits",
+        "description_zh": "Git 专项待处理：history commits；本次保留原有数值和行为。"
       },
       "history_batch": {
         "value": 200,
         "type": "usize",
         "unit": "items",
         "effect": "budget",
-        "description": "git: history batch"
+        "description": "git: history batch",
+        "description_zh": "Git 专项待处理：history batch；本次保留原有数值和行为。"
       },
       "stashes": {
         "value": 100,
         "type": "usize",
         "unit": "items",
         "effect": "truncate",
-        "description": "git: stashes"
+        "description": "git: stashes",
+        "description_zh": "Git 专项待处理：stashes；本次保留原有数值和行为。"
       },
       "refs": {
         "value": 1000,
         "type": "usize",
         "unit": "items",
         "effect": "truncate",
-        "description": "Maximum references listed by the repository panel"
+        "description": "Maximum references listed by the repository panel",
+        "description_zh": "Git 专项待处理：refs；本次保留原有数值和行为。"
       }
     },
     "diff": {
@@ -1230,21 +1382,24 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "truncate",
-        "description": "diff: preview bytes"
+        "description": "diff: preview bytes",
+        "description_zh": "Diff 专项待处理：preview bytes；本次保留原有数值和行为。"
       },
       "lines": {
         "value": 50000,
         "type": "usize",
         "unit": "items",
         "effect": "truncate",
-        "description": "diff: lines"
+        "description": "diff: lines",
+        "description_zh": "Diff 专项待处理：lines；本次保留原有数值和行为。"
       },
       "line_bytes": {
         "value": 65536,
         "type": "usize",
         "unit": "bytes",
         "effect": "truncate",
-        "description": "diff: line bytes"
+        "description": "diff: line bytes",
+        "description_zh": "Diff 专项待处理：line bytes；本次保留原有数值和行为。"
       }
     },
     "workspace": {
@@ -1253,21 +1408,24 @@
         "type": "usize",
         "unit": "items",
         "effect": "page",
-        "description": "Visible page/batch size; later results or history remain accessible through navigation."
+        "description": "Visible page/batch size; later search results or saved workspaces remain accessible through continuation controls.",
+        "description_zh": "可见页／批次大小，后续搜索结果或已保存工作空间可通过继续浏览入口访问。"
       },
       "search_entries": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Search walks all eligible entries and supports cancellable paged results."
+        "description": "Search traverses all eligible entries with cancellable result pages; there is no entry-scan total cutoff.",
+        "description_zh": "搜索遍历全部符合条件的条目并提供可取消的结果分页，不设置扫描条目总数截断。"
       },
       "recent_workspaces": {
         "value": 30,
         "type": "usize",
         "unit": "items",
         "effect": "page",
-        "description": "Visible page/batch size; later results or history remain accessible through navigation."
+        "description": "Visible page/batch size; later search results or saved workspaces remain accessible through continuation controls.",
+        "description_zh": "可见页／批次大小，后续搜索结果或已保存工作空间可通过继续浏览入口访问。"
       }
     },
     "update": {
@@ -1276,44 +1434,50 @@
         "type": "u64",
         "unit": "bytes",
         "effect": "unlimited",
-        "description": "Stream JSON session I/O and retain all actual windows, roots and tabs; validate identities and active indexes."
+        "description": "Stream session JSON and preserve all actual windows, roots and tabs while validating identities and active indexes.",
+        "description_zh": "流式读写会话 JSON，校验身份及活动索引，保留全部实际窗口、根目录和标签页。"
       },
       "workspaces": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Stream JSON session I/O and retain all actual windows, roots and tabs; validate identities and active indexes."
+        "description": "Stream session JSON and preserve all actual windows, roots and tabs while validating identities and active indexes.",
+        "description_zh": "流式读写会话 JSON，校验身份及活动索引，保留全部实际窗口、根目录和标签页。"
       },
       "roots_per_workspace": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Stream JSON session I/O and retain all actual windows, roots and tabs; validate identities and active indexes."
+        "description": "Stream session JSON and preserve all actual windows, roots and tabs while validating identities and active indexes.",
+        "description_zh": "流式读写会话 JSON，校验身份及活动索引，保留全部实际窗口、根目录和标签页。"
       },
       "tabs_per_workspace": {
         "value": null,
         "type": "usize",
         "unit": "items",
         "effect": "unlimited",
-        "description": "Stream JSON session I/O and retain all actual windows, roots and tabs; validate identities and active indexes."
+        "description": "Stream session JSON and preserve all actual windows, roots and tabs while validating identities and active indexes.",
+        "description_zh": "流式读写会话 JSON，校验身份及活动索引，保留全部实际窗口、根目录和标签页。"
       }
     },
     "audio_artwork": {
       "input_bytes": {
-        "value": 8388608,
+        "value": null,
         "type": "usize",
         "unit": "bytes",
-        "effect": "budget",
-        "description": "audio artwork: input bytes"
+        "effect": "unlimited",
+        "description": "Native metadata artwork is thumbnailed without an application byte gate. Open full artwork exposes its complete original snapshot.",
+        "description_zh": "原生元数据封面不设置应用层字节门槛；“打开完整封面”提供完整原始快照。"
       },
       "preview_edge": {
         "value": 600,
         "type": "u32",
         "unit": "pixels",
-        "effect": "truncate",
-        "description": "audio artwork: preview edge"
+        "effect": "budget",
+        "description": "Active cover thumbnail resolution; Open full artwork retains full-resolution source access.",
+        "description_zh": "当前封面缩略图分辨率；“打开完整封面”保留完整原图访问入口。"
       }
     },
     "io": {
@@ -1322,14 +1486,24 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Working buffer for cancellable streaming reads and temporary-text generation; independent of total file size."
+        "description": "Fixed working buffer for cancellable streaming reads, copies and report generation, independent of total source size.",
+        "description_zh": "可取消流式读取、复制及报告生成的固定工作缓冲，与源文件总大小无关。"
       },
       "cache_bytes": {
         "value": 67108864,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Rolling decoded-text cache. Older ranges are evicted and can be regenerated by seeking through the source stream."
+        "description": "Working cache/projection allowance for decoded text, executable metadata and vector/font projection buffers. Old text ranges regenerate; oversized representations retain complete source/byte pages.",
+        "description_zh": "解码文本、可执行文件元数据及网格／字体投影缓冲的工作缓存预算。旧文本范围可重新生成；较大的表示仍保留完整源码／字节分页。"
+      },
+      "record_bytes": {
+        "value": 67108864,
+        "type": "usize",
+        "unit": "bytes",
+        "effect": "budget",
+        "description": "One active XML/structured metadata record or value, independent of total file size; oversized records retain complete Source/header pages or native preview access.",
+        "description_zh": "单条活动 XML／结构化元数据记录或值的预算，与文件总大小无关；过大的记录仍可通过完整源码／头部分页或原生预览访问。"
       }
     },
     "svg": {
@@ -1338,7 +1512,8 @@
         "type": "usize",
         "unit": "bytes",
         "effect": "budget",
-        "description": "One active XML markup/text record in the streaming SVG sanitizer; independent of total document size."
+        "description": "One active XML markup/text record in the sanitizer, not a document total gate; native File bytes retains the complete source when preparation exceeds this budget.",
+        "description_zh": "清理器中单条活动 XML 标记／文本记录的工作预算，不是文档总量门槛；超出准备预算时，原生阅读器“文件字节”仍保留完整源文件。"
       }
     }
   }

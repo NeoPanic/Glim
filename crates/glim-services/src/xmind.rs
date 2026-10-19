@@ -59,7 +59,15 @@ pub fn read(path: &Path) -> Result<MindMap> {
         "XMind content exceeds the preview size limit",
     )?;
     let value = if modern {
-        serde_json::from_slice(&bytes).context("Invalid XMind JSON content")?
+        serde_json::from_slice(&bytes).map_err(|error| {
+            if error.to_string().contains("recursion limit exceeded") {
+                anyhow::Error::new(reader_limits::PreviewBudgetExceeded(
+                    "XMind JSON parser stack budget exceeded",
+                ))
+            } else {
+                anyhow::Error::new(error).context("Invalid XMind JSON content")
+            }
+        })?
     } else {
         legacy_content(&bytes)?
     };

@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 import CoreServices
 import CoreText
 
-struct Playlist: Decodable { let files: [String]; let shuffle: Bool; let autoplay: Bool?; let playbackFiles: [String: String]?; let matroskaFiles: [String]?; let mediaHelper: String?; let mediaDirectory: String?; let mediaErrors: [String: String]?; let office: Bool?; let image: Bool?; let imagePath: String?; let associations: String?; let font: Bool?; let sqlite: String?; let sqliteInfo: String?; let spreadsheet: String?; let htmlContent: String?; let language: String?; let localizations: [String: String]? }
+struct Playlist: Decodable { let files: [String]; let shuffle: Bool; let autoplay: Bool?; let playbackFiles: [String: String]?; let matroskaFiles: [String]?; let mediaHelper: String?; let mediaDirectory: String?; let mediaErrors: [String: String]?; let office: Bool?; let image: Bool?; let imagePath: String?; let imageWidth: Double?; let imageHeight: Double?; let associations: String?; let font: Bool?; let sqlite: String?; let sqliteInfo: String?; let spreadsheet: String?; let htmlContent: String?; let language: String?; let localizations: [String: String]? }
 
 var nativeTranslations: [String: String] = [:]
 func L(_ text: String) -> String { nativeTranslations[text] ?? text }
@@ -283,6 +283,24 @@ final class FontPreview: NSObject, NSTextFieldDelegate {
     }
 }
 
+// The active cover has one retained snapshot; opening it hands a complete
+// image to the default viewer instead of limiting access to the thumbnail.
+private final class ArtworkSnapshot {
+    let url: URL
+    private var opened = false
+    init(data: Data, source: CGImageSource) throws {
+        let ext = (CGImageSourceGetType(source) as String?).flatMap { UTType($0)?.preferredFilenameExtension } ?? "png"
+        url = FileManager.default.temporaryDirectory.appendingPathComponent("glim-artwork-" + UUID().uuidString).appendingPathExtension(ext)
+        try data.write(to: url, options: .atomic)
+    }
+    func open() { opened = NSWorkspace.shared.open(url) }
+    deinit {
+        guard !opened else { return } // The external viewer may still be opening this file.
+        let path = url
+        DispatchQueue.global(qos: .utility).async { try? FileManager.default.removeItem(at: path) }
+    }
+}
+
 // An audio-only surface underneath AVKit's native playback controls.
 final class AudioBackdrop: NSView {
     var song = "" { didSet { needsDisplay = true } }
@@ -422,6 +440,8 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
     let playerView = AVPlayerView()
     let pdfView = PDFView()
     let audioBackdrop = AudioBackdrop()
+    private var artworkSnapshot: ArtworkSnapshot?
+    private let artworkButton = NSButton(title: L("Open full artwork"), target: nil, action: nil)
     var metadataAsset: AVURLAsset?
     let titleLabel = NSTextField(labelWithString: "")
     let detailLabel = NSTextField(labelWithString: "")
@@ -483,7 +503,8 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         }
         if playlist.image == true {
             let imageURL = playlist.imagePath.map { URL(fileURLWithPath: $0) } ?? urls[0]
-            let preview = ImagePreview(url: imageURL); imagePreview = preview
+            let sourceSize = playlist.imageWidth.flatMap { width in playlist.imageHeight.map { NSSize(width: width, height: $0) } }
+            let preview = ImagePreview(url: imageURL, sourceSize: sourceSize); imagePreview = preview
             preview.view.frame = host.bounds; preview.view.autoresizingMask = [.width, .height]
             host.addSubview(preview.view); return
         }
@@ -520,6 +541,8 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             toolbar.addArrangedSubview(button(L("Fit"), #selector(fit)))
         } else {
             toolbar.addArrangedSubview(button(L("Play / Pause"), #selector(togglePlay)))
+            artworkButton.target = self; artworkButton.action = #selector(openArtwork)
+            artworkButton.isHidden = true; toolbar.addArrangedSubview(artworkButton)
         }
         toolbar.addArrangedSubview(titleLabel)
         toolbar.addArrangedSubview(detailLabel)
@@ -722,6 +745,7 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
     func updateAudioArtwork(_ url: URL, item: AVPlayerItem) {
         metadataAsset?.cancelLoading()
         audioBackdrop.artwork = nil
+        artworkSnapshot = nil; artworkButton.isHidden = true
         audioBackdrop.song = url.deletingPathExtension().lastPathComponent
         audioBackdrop.artist = ""
         audioBackdrop.album = url.pathExtension.uppercased() + " · Audio"
@@ -740,9 +764,10 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             let artist = value(.commonKeyArtist)
             let album = value(.commonKeyAlbumName)
             var image: CGImage?
+            var artworkFile: ArtworkSnapshot?
             if let data = AVMetadataItem.metadataItems(from: metadata, withKey: AVMetadataKey.commonKeyArtwork, keySpace: .common).first?.dataValue,
-                data.count <= ReaderLimits.AUDIO_ARTWORK_INPUT_BYTES,
                 let source = CGImageSourceCreateWithData(data as CFData, nil) {
+                artworkFile = try? ArtworkSnapshot(data: data, source: source)
                 image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: ReaderLimits.AUDIO_ARTWORK_PREVIEW_EDGE, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary)
             }
             DispatchQueue.main.async {
@@ -751,12 +776,14 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
                 if let song = song, !song.isEmpty { self.audioBackdrop.song = song }
                 self.audioBackdrop.artist = artist ?? ""
                 if let album = album, !album.isEmpty { self.audioBackdrop.album = album }
+                self.artworkSnapshot = artworkFile; self.artworkButton.isHidden = artworkFile == nil
                 if let image = image { self.audioBackdrop.artwork = NSImage(cgImage: image, size: .zero) }
                 self.audioBackdrop.setAccessibilityLabel([self.audioBackdrop.song, self.audioBackdrop.artist, self.audioBackdrop.album].filter { !$0.isEmpty }.joined(separator: ", "))
             }
         }
     }
 
+    @objc private func openArtwork() { artworkSnapshot?.open() }
     func skipFailed(_ item: AVPlayerItem) {
         guard player.currentItem === item, failed.insert(urls[index]).inserted else { return }
         detailLabel.stringValue = L("Cannot play this format or codec")
@@ -792,7 +819,7 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             host.updateAccessibility()
         }
         host.removeFromSuperview()
-        metadataAsset?.cancelLoading(); token = nil; playbackStateObserver = nil
+        metadataAsset?.cancelLoading(); artworkSnapshot = nil; token = nil; playbackStateObserver = nil
         if let observer = playbackObserver { player.removeTimeObserver(observer); playbackObserver = nil }
         player.pause(); player.replaceCurrentItem(with: nil)
     }

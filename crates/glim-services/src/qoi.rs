@@ -9,6 +9,12 @@ pub(crate) fn prepare(
     path: &Path,
     cancel: &crate::work::Cancellation,
 ) -> Result<tempfile::NamedTempFile> {
+    prepare_with_size(path, cancel).map(|(file, _)| file)
+}
+pub(crate) fn prepare_with_size(
+    path: &Path,
+    cancel: &crate::work::Cancellation,
+) -> Result<(tempfile::NamedTempFile, (u32, u32))> {
     let mut input = BufReader::with_capacity(crate::limits::IO_BUFFER_BYTES, File::open(path)?);
     let before = input.get_ref().metadata()?;
     let mut header = [0; 14];
@@ -20,13 +26,17 @@ pub(crate) fn prepare(
         width > 0 && height > 0 && matches!(header[12], 3 | 4) && header[13] <= 1,
         "Invalid QOI header"
     );
-    ensure!(
-        u64::from(width) * 4 * 2 <= crate::limits::IMAGE_DECODED_BYTES,
-        "QOI scanline exceeds the active PNG encoder buffer budget"
-    );
+    let edge = ((crate::limits::IMAGE_DECODED_BYTES / 4) as f64)
+        .sqrt()
+        .floor()
+        .max(1.) as u64;
+    let longest = u64::from(width.max(height));
+    let edge = edge.min(longest);
+    let output_width = (u64::from(width) * edge / longest).max(1) as u32;
+    let output_height = (u64::from(height) * edge / longest).max(1) as u32;
     let mut file = tempfile::Builder::new().suffix(".png").tempfile()?;
     {
-        let mut encoder = png::Encoder::new(file.as_file_mut(), width, height);
+        let mut encoder = png::Encoder::new(file.as_file_mut(), output_width, output_height);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         if header[13] == 0 {
@@ -40,7 +50,17 @@ pub(crate) fn prepare(
         let mut previous = [0u8, 0, 0, 255];
         let mut index = [[0u8; 4]; 64];
         let mut run = 0;
-        for _ in 0..u64::from(width) * u64::from(height) {
+        let (mut x, mut y) = (0_u32, 0_u32);
+        let sample = |x: u32, y: u32| {
+            let sx = (u64::from(x) * 2 + 1) * u64::from(width) / (u64::from(output_width) * 2);
+            let sy = (u64::from(y) * 2 + 1) * u64::from(height) / (u64::from(output_height) * 2);
+            sy * u64::from(width) + sx
+        };
+        let mut next_pixel = sample(x, y);
+        for pixel in 0..u64::from(width) * u64::from(height) {
+            if pixel % crate::limits::IO_BUFFER_BYTES as u64 == 0 {
+                cancel.check()?;
+            }
             if run > 0 {
                 run -= 1;
             } else {
@@ -79,7 +99,19 @@ pub(crate) fn prepare(
                     % 64;
                 index[hash as usize] = previous;
             }
-            output.extend_from_slice(&previous);
+            if pixel == next_pixel {
+                output.extend_from_slice(&previous);
+                x += 1;
+                if x == output_width {
+                    x = 0;
+                    y += 1;
+                }
+                next_pixel = if y < output_height {
+                    sample(x, y)
+                } else {
+                    u64::MAX
+                };
+            }
             if output.len() >= crate::limits::IO_BUFFER_BYTES {
                 cancel.check()?;
                 stream.write_all(&output)?;
@@ -99,5 +131,5 @@ pub(crate) fn prepare(
         before.len() == after.len() && before.modified().ok() == after.modified().ok(),
         "Image changed during preparation; reopen it"
     );
-    Ok(file)
+    Ok((file, (width, height)))
 }

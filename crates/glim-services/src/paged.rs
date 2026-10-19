@@ -89,10 +89,21 @@ pub fn read_binary_page(path: &Path, start: u64) -> Result<TextPage> {
     )
 }
 pub fn generated(path: &Path, backing: tempfile::NamedTempFile) -> Result<TextPage> {
+    generated_view(path, backing, false)
+}
+pub fn generated_binary(path: &Path, backing: tempfile::NamedTempFile) -> Result<TextPage> {
+    generated_view(path, backing, true)
+}
+pub fn text_value(text: &str, cancel: &crate::work::Cancellation) -> Result<TextPage> {
+    let mut file = tempfile::NamedTempFile::new()?;
+    cancel.copy(std::io::Cursor::new(text.as_bytes()), file.as_file_mut())?;
+    generated_view(Path::new("Value"), file, text.contains('\0'))
+}
+fn generated_view(path: &Path, backing: tempfile::NamedTempFile, binary: bool) -> Result<TextPage> {
     read_source(
         PageSource {
             original: std::path::absolute(path)?,
-            binary: false,
+            binary,
             backing: Some(Arc::new(backing)),
             stream: None,
         },
@@ -108,12 +119,20 @@ pub fn compressed(
     compression: crate::streamed::Compression,
     cancel: &crate::work::Cancellation,
 ) -> Result<TextPage> {
+    compressed_view(path, compression, false, cancel)
+}
+fn compressed_view(
+    path: &Path,
+    compression: crate::streamed::Compression,
+    binary: bool,
+    cancel: &crate::work::Cancellation,
+) -> Result<TextPage> {
     let (lifetime, owner) = crate::work::Cancellation::task();
     let stream =
         crate::streamed::StreamedText::new(std::path::absolute(path)?, compression, lifetime)?;
     let source = PageSource {
         original: std::path::absolute(path)?,
-        binary: false,
+        binary,
         backing: Some(stream.file.clone()),
         stream: Some(Arc::new(std::sync::Mutex::new(stream))),
     };
@@ -134,7 +153,9 @@ fn read_source_cancellable(
         let mut stream = stream
             .lock()
             .map_err(|_| anyhow::anyhow!("Reader interrupted"))?;
-        let bytes = if all {
+        let bytes = if source.binary {
+            reader_limits::BINARY_PREVIEW_BYTES as u64
+        } else if all {
             FULL_BYTES.min(reader_limits::IO_CACHE_BYTES)
         } else {
             PAGE_BYTES
@@ -149,14 +170,14 @@ fn read_source_cancellable(
     let total = stream_total.map_or(metadata.len(), |value| value.0);
     ensure!(start <= total, "File changed; reopen it to restart reading");
     file.seek(SeekFrom::Start(start - base))?;
-    let limit = if source.stream.is_some() {
+    let limit = if source.binary {
+        reader_limits::BINARY_PREVIEW_BYTES as u64
+    } else if source.stream.is_some() {
         if all {
             FULL_BYTES.min(reader_limits::IO_CACHE_BYTES)
         } else {
             PAGE_BYTES
         }
-    } else if source.binary {
-        reader_limits::BINARY_PREVIEW_BYTES as u64
     } else if all {
         if source.is_editable() {
             FULL_BYTES.min(reader_limits::TEXT_EDITABLE_BYTES)
@@ -269,6 +290,35 @@ impl TextPage {
 }
 
 #[derive(Clone)]
+pub struct PageRefresh {
+    pub source: PageSource,
+    pub start: u64,
+    pub total: u64,
+    pub modified: Option<SystemTime>,
+    pub identity: (u64, u64),
+}
+impl PageRefresh {
+    pub fn read(&self, cancel: &crate::work::Cancellation) -> Result<Option<TextPage>> {
+        cancel.check()?;
+        let metadata = std::fs::metadata(&self.source.original)?;
+        if (
+            metadata.len(),
+            metadata.modified().ok(),
+            (metadata.dev(), metadata.ino()),
+        ) == (self.total, self.modified, self.identity)
+        {
+            return Ok(None);
+        }
+        let start = if self.start <= metadata.len() {
+            self.start
+        } else {
+            0
+        };
+        self.source.read_cancellable(start, false, cancel).map(Some)
+    }
+}
+
+#[derive(Clone)]
 pub struct PageEdit {
     pub path: PathBuf,
     pub start: u64,
@@ -287,11 +337,15 @@ pub struct PageSaved {
 /// Replace one edited range through a same-directory temporary file. The rest
 /// of the document is copied in fixed buffers; no whole-document allocation.
 pub fn save_page(page: &PageEdit, text: &str) -> Result<PageSaved> {
+    save_page_cancellable(page, text, &crate::work::Cancellation::default())
+}
+pub fn save_page_cancellable(
+    page: &PageEdit,
+    text: &str,
+    cancel: &crate::work::Cancellation,
+) -> Result<PageSaved> {
     use anyhow::Context;
-    use std::io::Write;
-    let _lock = crate::files::SAVE_LOCK
-        .lock()
-        .map_err(|_| anyhow::anyhow!("Save lock unavailable"))?;
+    let _lock = crate::files::save_lock(cancel)?;
     ensure!(!text.contains('\0'), "Text contains a null byte");
     let target = page
         .path
@@ -316,19 +370,24 @@ pub fn save_page(page: &PageEdit, text: &str) -> Result<PageSaved> {
         "Invalid page snapshot"
     );
     source.seek(SeekFrom::Start(page.start))?;
-    let mut expected = vec![0; page.expected.len()];
-    source.read_exact(&mut expected)?;
-    ensure!(
-        expected == page.expected.as_bytes(),
-        "File changed on disk. Save canceled; your edits are still open."
-    );
-    drop(expected);
+    let mut buffer = vec![0; reader_limits::IO_BUFFER_BYTES];
+    for expected in page
+        .expected
+        .as_bytes()
+        .chunks(reader_limits::IO_BUFFER_BYTES)
+    {
+        cancel.check()?;
+        source.read_exact(&mut buffer[..expected.len()])?;
+        ensure!(
+            &buffer[..expected.len()] == expected,
+            "File changed on disk. Save canceled; your edits are still open."
+        );
+    }
     let mut output =
         tempfile::NamedTempFile::new_in(target.parent().context("File has no parent folder")?)?;
     source.seek(SeekFrom::Start(0))?;
-    let cancel = crate::work::Cancellation::default();
     cancel.copy((&mut source).take(page.start), output.as_file_mut())?;
-    output.write_all(text.as_bytes())?;
+    cancel.copy(std::io::Cursor::new(text.as_bytes()), output.as_file_mut())?;
     source.seek(SeekFrom::Start(page.end))?;
     cancel.copy(&mut source, output.as_file_mut())?;
     let after = std::fs::metadata(&target)?;
@@ -341,6 +400,7 @@ pub fn save_page(page: &PageEdit, text: &str) -> Result<PageSaved> {
     );
     output.as_file().set_permissions(before.permissions())?;
     output.as_file().sync_all()?;
+    cancel.check()?;
     output.persist(&target).map_err(|error| error.error)?;
     let saved = std::fs::metadata(&target)?;
     Ok(PageSaved {
@@ -353,6 +413,21 @@ pub fn save_page(page: &PageEdit, text: &str) -> Result<PageSaved> {
 
 /// Read a text member without extracting its complete uncompressed contents.
 pub fn zip_member(path: &Path, name: &str, cancel: &crate::work::Cancellation) -> Result<TextPage> {
+    zip_member_view(path, name, false, cancel)
+}
+pub fn zip_member_bytes(
+    path: &Path,
+    name: &str,
+    cancel: &crate::work::Cancellation,
+) -> Result<TextPage> {
+    zip_member_view(path, name, true, cancel)
+}
+fn zip_member_view(
+    path: &Path,
+    name: &str,
+    binary: bool,
+    cancel: &crate::work::Cancellation,
+) -> Result<TextPage> {
     cancel.check()?;
     let mut archive = zip::ZipArchive::new(File::open(path)?)?;
     let entry = archive.by_name(name)?;
@@ -370,5 +445,5 @@ pub fn zip_member(path: &Path, name: &str, cancel: &crate::work::Cancellation) -
     };
     drop(entry);
     drop(archive);
-    compressed(path, compression, cancel)
+    compressed_view(path, compression, binary, cancel)
 }

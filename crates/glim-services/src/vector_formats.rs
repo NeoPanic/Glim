@@ -166,6 +166,10 @@ fn mesh(bytes: &[u8], ext: &str) -> Result<String> {
             body,
             "<polygon points=\"{points}\" fill=\"#5288c855\" stroke=\"#235a9c\" stroke-width=\"2\"/>"
         )?;
+        reader_limits::preview_budget(
+            body.len() as u64 <= reader_limits::IO_CACHE_BYTES,
+            "Mesh projection working buffer exceeded",
+        )?;
     }
     Ok(body)
 }
@@ -225,14 +229,20 @@ fn font(text: &str) -> Result<String> {
                 line.len() <= reader_limits::BDF_GLYPH_EDGE / 4,
                 "Glyph row preview working budget exceeded",
             )?;
-            let bits = u64::from_str_radix(line, 16)?;
+            ensure!(
+                line.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                "Invalid BDF bitmap row"
+            );
             let bit_width = line.len() * 4;
             ensure!(
                 bit_width <= reader_limits::BDF_GLYPH_EDGE && bit_width >= width,
                 "Invalid BDF bitmap row"
             );
             for col in 0..width {
-                if (bits >> (bit_width - 1 - col)) & 1 == 1 {
+                let digit = char::from(line.as_bytes()[col / 4])
+                    .to_digit(16)
+                    .context("Invalid BDF bitmap row")?;
+                if (digit >> (3 - col % 4)) & 1 == 1 {
                     write!(
                         body,
                         "<rect x=\"{}\" y=\"{}\" width=\"{pixel}\" height=\"{pixel}\" fill=\"#235a9c\"/>",
@@ -241,6 +251,10 @@ fn font(text: &str) -> Result<String> {
                     )?;
                 }
             }
+            reader_limits::preview_budget(
+                body.len() as u64 <= reader_limits::IO_CACHE_BYTES,
+                "Glyph projection working buffer exceeded",
+            )?;
             row += 1;
         }
     }

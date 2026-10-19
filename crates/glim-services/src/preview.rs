@@ -127,8 +127,15 @@ pub struct PreparedPreview {
     pub configuration: Vec<u8>,
     // The native SQLite view must close before its private snapshot is removed.
     _sqlite: Option<crate::sqlite::Snapshot>,
+    _spreadsheet: Option<crate::spreadsheet::Spreadsheet>,
     _media_directory: Option<tempfile::TempDir>,
     _image: Option<tempfile::NamedTempFile>,
+}
+
+impl PreparedPreview {
+    pub fn is_spreadsheet(&self) -> bool {
+        self._spreadsheet.is_some()
+    }
 }
 
 pub fn prepare(
@@ -188,16 +195,19 @@ pub fn prepare_cancellable(
             .and_then(|s| s.to_str())
             .is_some_and(|s| s.eq_ignore_ascii_case("xls") || s.eq_ignore_ascii_case("xlsx"))
     {
-        Some(crate::spreadsheet::preview(path)?)
+        crate::spreadsheet::prepare(path, cancel)?
     } else {
         None
     };
+    let mut image_size = None;
     let image = if !folder
         && path
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("qoi"))
     {
-        Some(crate::qoi::prepare(path, cancel)?)
+        let (file, size) = crate::qoi::prepare_with_size(path, cancel)?;
+        image_size = Some(size);
+        Some(file)
     } else if !folder
         && path
             .extension()
@@ -208,9 +218,11 @@ pub fn prepare_cancellable(
         None
     };
     let mut configuration = serde_json::json!({"files": files, "shuffle": shuffle, "autoplay": autoplay, "office": !folder && is_office(path), "font": !folder && is_font(path),
-        "sqlite": sqlite.as_ref().and_then(|s| s.database.as_ref()).and_then(|p| p.to_str()),
-        "sqliteInfo": sqlite.as_ref().map(|s| &s.information), "spreadsheet": spreadsheet});
+        "sqlite": spreadsheet.as_ref().map(|s| s.database.as_path()).or_else(|| sqlite.as_ref().and_then(|s| s.database.as_deref())).and_then(|p| p.to_str()),
+        "sqliteInfo": spreadsheet.as_ref().map(|s| &s.information).or_else(|| sqlite.as_ref().map(|s| &s.information))});
     configuration["image"] = serde_json::json!(!folder && is_image(path));
+    configuration["imageWidth"] = serde_json::json!(image_size.map(|size| size.0));
+    configuration["imageHeight"] = serde_json::json!(image_size.map(|size| size.1));
     configuration["imagePath"] =
         serde_json::json!(image.as_ref().and_then(|image| image.path().to_str()));
     configuration["matroskaFiles"] = serde_json::json!(matroska);
@@ -233,6 +245,7 @@ pub fn prepare_cancellable(
         image_stamp,
         configuration: serde_json::to_vec(&configuration)?,
         _sqlite: sqlite,
+        _spreadsheet: spreadsheet,
         _media_directory: media_directory,
         _image: image,
     })

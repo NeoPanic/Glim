@@ -26,9 +26,7 @@ pub(super) struct PagedReader {
     scroll: UniformListScrollHandle,
 }
 impl PagedReader {
-    pub fn new(mut page: TextPage, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let rows = rows(&page.text);
-        let widest_row = widest_row(&page.text, &rows);
+    pub fn new(page: TextPage, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let source_editor = page.source.is_editable().then(|| {
             super::source::SourceReader::new(
                 &page.text,
@@ -40,6 +38,19 @@ impl PagedReader {
                 cx,
             )
         });
+        Self::with_editor(page, source_editor)
+    }
+    pub fn readonly(page: TextPage) -> Self {
+        Self::with_editor(page, None)
+    }
+    pub fn text_only(page: TextPage) -> Self {
+        let mut view = Self::readonly(page);
+        view.report_source = None;
+        view
+    }
+    fn with_editor(mut page: TextPage, source_editor: Option<super::source::SourceReader>) -> Self {
+        let rows = rows(&page.text);
+        let widest_row = widest_row(&page.text, &rows);
         Self {
             _source_owner: page.owner.take(),
             source_editor,
@@ -53,6 +64,16 @@ impl PagedReader {
             error: None,
             scroll: UniformListScrollHandle::new(),
         }
+    }
+    pub fn refresh_request(&self) -> Option<glim_services::paged::PageRefresh> {
+        self.source_editor.as_ref()?;
+        Some(glim_services::paged::PageRefresh {
+            source: self.page.source.clone(),
+            start: self.page.start,
+            total: self.page.total,
+            modified: self.page.modified,
+            identity: self.page.identity,
+        })
     }
     pub fn request_save_before_preview(&mut self, cx: &mut Context<Self>) {
         self.error = Some(glim_services::locale::tr(
@@ -203,7 +224,7 @@ fn rows(text: &str) -> Vec<Range<usize>> {
     let mut start = 0;
     // Cap individual layout runs, including minified multi-megabyte JSON lines.
     for (offset, ch) in text.char_indices() {
-        if ch == '\n' || offset - start >= 1024 {
+        if ch == '\n' || offset - start >= glim_services::limits::TEXT_LAYOUT_RUN_BYTES {
             result.push(start..offset);
             start = if ch == '\n' { offset + 1 } else { offset };
         }
@@ -248,6 +269,19 @@ impl Render for PagedReader {
                         self.page.total,
                         if self.page.total_known { "" } else { "+" }
                     )))
+                    .when(self.source_editor.is_none(), |bar| {
+                        bar.child(
+                            Button::new("copy-reader-page")
+                                .ghost()
+                                .label(glim_services::locale::tr("Copy page"))
+                                .disabled(busy)
+                                .on_click(cx.listener(|view, _, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(
+                                        view.page.text.clone(),
+                                    ));
+                                })),
+                        )
+                    })
                     .when(self.report_source.is_some(), |bar| {
                         bar.child(
                             Button::new("page-raw")

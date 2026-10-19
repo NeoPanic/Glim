@@ -158,25 +158,30 @@ fn numpy_stream(path: &Path, output: &mut impl Write, cancel: &Cancellation) -> 
         .checked_add(length)
         .filter(|end| *end <= total)
         .context("Truncated NumPy header")?;
-    let mut prefix = Vec::new();
-    (&mut input)
-        .take(length.min(reader_limits::NUMPY_HEADER_BYTES as u64))
-        .read_to_end(&mut prefix)?;
+    let mut metadata = NumpyMetadata::default();
+    let mut remaining = length;
+    let mut buffer = vec![0; reader_limits::IO_BUFFER_BYTES];
     writeln!(output, "NumPy v{version}")?;
-    output.write_all(&prefix)?;
-    cancel.copy(
-        (&mut input).take(length - prefix.len() as u64),
-        &mut *output,
-    )?;
+    while remaining > 0 {
+        cancel.check()?;
+        let count = usize::try_from(remaining.min(buffer.len() as u64))?;
+        input.read_exact(&mut buffer[..count])?;
+        for byte in &buffer[..count] {
+            metadata.push(*byte);
+        }
+        if version == 3 || buffer[..count].is_ascii() {
+            output.write_all(&buffer[..count])?;
+        } else {
+            let text = buffer[..count]
+                .iter()
+                .map(|byte| char::from(*byte))
+                .collect::<String>();
+            output.write_all(text.as_bytes())?;
+        }
+        remaining -= count as u64;
+    }
     writeln!(output)?;
-    let header = std::str::from_utf8(&prefix).context("Invalid NumPy header")?;
-    ensure!(
-        !header.contains("'O") && !header.contains("\"O"),
-        "Object arrays are unsupported; pickle is never executed"
-    );
-    let descriptor = ["<f8", "<f4", "<i8", "<i4", "|u1"]
-        .into_iter()
-        .find(|d| header.contains(d));
+    let descriptor = metadata.descriptor.as_deref();
     let size = match descriptor {
         Some("<f8" | "<i8") => 8,
         Some("<f4" | "<i4") => 4,
@@ -192,18 +197,14 @@ fn numpy_stream(path: &Path, output: &mut impl Write, cancel: &Cancellation) -> 
         )?;
         return Ok(());
     }
-    let shape = header
-        .split("shape")
-        .nth(1)
-        .and_then(|s| s.split('(').nth(1))
-        .and_then(|s| s.split(')').next())
-        .context("NumPy shape is unavailable")?;
-    let mut count = 1u64;
-    for dim in shape.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-        count = count
-            .checked_mul(dim.parse()?)
-            .context("NumPy dimensions overflow")?;
-    }
+    let Some(count) = metadata.elements.filter(|_| metadata.shape) else {
+        writeln!(
+            output,
+            "{}",
+            crate::locale::tr("Numeric preview unavailable for this data type")
+        )?;
+        return Ok(());
+    };
     ensure!(
         count.checked_mul(size as u64) == Some(total - data_offset),
         "NumPy data length does not match shape"
@@ -223,4 +224,98 @@ fn numpy_stream(path: &Path, output: &mut impl Write, cancel: &Cancellation) -> 
         writeln!(output, "[{index}] {value}")?;
     }
     Ok(())
+}
+
+#[derive(Default)]
+struct NumpyMetadata {
+    depth: usize,
+    quote: u8,
+    escaped: bool,
+    token: String,
+    key: String,
+    reading_key: bool,
+    descriptor: Option<String>,
+    shape: bool,
+    in_shape: bool,
+    dimension: Option<u64>,
+    digit: bool,
+    elements: Option<u64>,
+}
+impl NumpyMetadata {
+    fn dimension(&mut self) {
+        if self.digit {
+            self.elements = if self.dimension == Some(0) {
+                Some(0)
+            } else {
+                self.elements
+                    .and_then(|count| count.checked_mul(self.dimension?))
+            };
+        }
+        self.dimension = Some(0);
+        self.digit = false;
+    }
+    fn push(&mut self, byte: u8) {
+        if self.quote != 0 {
+            if self.escaped {
+                self.escaped = false;
+            } else if byte == b'\\' {
+                self.escaped = true;
+            } else if byte == self.quote {
+                self.quote = 0;
+                if self.depth == 1 {
+                    if self.reading_key {
+                        self.key.clone_from(&self.token);
+                    } else if self.key == "descr" {
+                        self.descriptor = Some(self.token.clone());
+                    }
+                }
+                return;
+            }
+            if self.token.len() < reader_limits::NUMPY_HEADER_BYTES {
+                self.token.push(char::from(byte));
+            }
+            return;
+        }
+        match byte {
+            b'\'' | b'"' => {
+                self.quote = byte;
+                self.token.clear();
+            }
+            b'{' => {
+                self.depth += 1;
+                if self.depth == 1 {
+                    self.reading_key = true;
+                }
+            }
+            b':' if self.depth == 1 => self.reading_key = false,
+            b',' if self.depth == 1 => {
+                self.reading_key = true;
+                self.key.clear();
+            }
+            b'(' | b'[' => {
+                if self.depth == 1 && self.key == "shape" {
+                    self.in_shape = true;
+                    self.shape = true;
+                    self.elements = Some(1);
+                    self.dimension = Some(0);
+                }
+                self.depth += 1;
+            }
+            b')' | b']' | b'}' => {
+                if self.in_shape && self.depth == 2 {
+                    self.dimension();
+                    self.in_shape = false;
+                }
+                self.depth = self.depth.saturating_sub(1);
+            }
+            b',' if self.in_shape => self.dimension(),
+            b'0'..=b'9' if self.in_shape => {
+                self.digit = true;
+                self.dimension = self
+                    .dimension
+                    .and_then(|value| value.checked_mul(10)?.checked_add(u64::from(byte - b'0')));
+            }
+            _ => {}
+        }
+    }
 }

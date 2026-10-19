@@ -4,7 +4,7 @@ use std::{fs::File, io::Read, path::Path};
 use anyhow::{Context, Result, ensure};
 use glim_core::{Document, DocumentKind};
 
-/// Editable text budget; larger files use bounded, read-only windows.
+/// In-memory editing budget; larger files use editable streaming-save pages.
 pub const MAX_DOCUMENT_BYTES: u64 = reader_limits::TEXT_EDITABLE_BYTES;
 
 pub(crate) static SAVE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -20,11 +20,10 @@ pub fn read_document(path: &Path) -> Result<Document> {
     // Limit the read itself, so a file growing after metadata inspection is bounded too.
     let mut bytes = Vec::new();
     file.take(MAX_DOCUMENT_BYTES + 1).read_to_end(&mut bytes)?;
-    ensure!(
+    reader_limits::preview_budget(
         bytes.len() as u64 <= MAX_DOCUMENT_BYTES,
-        "File exceeds the editing size limit: {}",
-        path.display()
-    );
+        "Use editable pages for this document",
+    )?;
     ensure!(
         !bytes.contains(&0),
         "Binary files are not supported: {}",
@@ -42,10 +41,29 @@ pub fn read_document(path: &Path) -> Result<Document> {
 /// Save an existing text file only if it still matches the opened snapshot.
 /// A same-directory temporary file avoids truncation on a failed write.
 pub fn save_document(path: &Path, expected: &str, text: &str) -> Result<()> {
-    use std::io::Write;
-    let _guard = SAVE_LOCK
-        .lock()
-        .map_err(|_| anyhow::anyhow!("Save lock unavailable"))?;
+    save_document_cancellable(path, expected, text, &crate::work::Cancellation::default())
+}
+pub(crate) fn save_lock(
+    cancel: &crate::work::Cancellation,
+) -> Result<std::sync::MutexGuard<'static, ()>> {
+    loop {
+        cancel.check()?;
+        match SAVE_LOCK.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(std::sync::TryLockError::Poisoned(_)) => anyhow::bail!("Save lock unavailable"),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(20))
+            }
+        }
+    }
+}
+pub fn save_document_cancellable(
+    path: &Path,
+    expected: &str,
+    text: &str,
+    cancel: &crate::work::Cancellation,
+) -> Result<()> {
+    let _guard = save_lock(cancel)?;
     ensure!(
         !text.contains('\0'),
         "Text contains a null byte and cannot be reopened as a supported text file"
@@ -60,21 +78,25 @@ pub fn save_document(path: &Path, expected: &str, text: &str) -> Result<()> {
         "File is read-only; your edits have not been saved"
     );
     ensure!(
-        matches_disk(&target, expected)?,
+        matches_disk(&target, expected, cancel)?,
         "File changed on disk. Save canceled to avoid overwriting external changes; your edits are still open."
     );
     let parent = target.parent().context("File has no parent folder")?;
     let mut temporary = tempfile::NamedTempFile::new_in(parent)
         .context("Cannot create a save file in this folder")?;
-    temporary.write_all(text.as_bytes())?;
+    cancel.copy(
+        std::io::Cursor::new(text.as_bytes()),
+        temporary.as_file_mut(),
+    )?;
     temporary
         .as_file()
         .set_permissions(metadata.permissions())?;
     temporary.as_file().sync_all()?;
     ensure!(
-        matches_disk(&target, expected)?,
+        matches_disk(&target, expected, cancel)?,
         "File changed while saving; your edits are still open."
     );
+    cancel.check()?;
     temporary
         .persist(&target)
         .map_err(|e| e.error)
@@ -84,14 +106,15 @@ pub fn save_document(path: &Path, expected: &str, text: &str) -> Result<()> {
 
 // Compare in fixed-size chunks instead of allocating another complete document
 // for each of the two optimistic concurrency checks during autosave.
-fn matches_disk(path: &Path, expected: &str) -> Result<bool> {
+fn matches_disk(path: &Path, expected: &str, cancel: &crate::work::Cancellation) -> Result<bool> {
     let mut file = File::open(path)?;
     if file.metadata()?.len() != expected.len() as u64 {
         return Ok(false);
     }
-    let mut buffer = [0u8; 64 * 1024];
+    let mut buffer = vec![0; reader_limits::IO_BUFFER_BYTES];
     let mut offset = 0;
     loop {
+        cancel.check()?;
         let count = file.read(&mut buffer)?;
         if count == 0 {
             return Ok(offset == expected.len());

@@ -143,7 +143,12 @@ impl Reader {
             .path
             .extension()
             .and_then(|s| s.to_str())
-            .is_some_and(|s| s.eq_ignore_ascii_case("csv") || s.eq_ignore_ascii_case("tsv"))
+            .is_some_and(|s| {
+                matches!(
+                    s.to_ascii_lowercase().as_str(),
+                    "csv" | "tsv" | "gpx" | "kml"
+                )
+            })
             .then(|| (cx.new(|_| csv::CsvTable::new()), false));
         let mut reader = Self {
             title: document.path.display().to_string().into(),
@@ -248,7 +253,12 @@ impl Reader {
         let csv = path
             .extension()
             .and_then(|s| s.to_str())
-            .filter(|s| s.eq_ignore_ascii_case("csv") || s.eq_ignore_ascii_case("tsv"))
+            .filter(|s| {
+                matches!(
+                    s.to_ascii_lowercase().as_str(),
+                    "csv" | "tsv" | "gpx" | "kml"
+                )
+            })
             .map(|ext| {
                 let delimiter = if ext.eq_ignore_ascii_case("tsv") {
                     b'\t'
@@ -568,6 +578,13 @@ impl Reader {
             _ => None,
         }
     }
+    pub fn page_refresh_request(&self, cx: &App) -> Option<glim_services::paged::PageRefresh> {
+        if let Renderer::Paged { view, .. } = &self.renderer {
+            view.read(cx).refresh_request()
+        } else {
+            None
+        }
+    }
     pub fn page_save_request(&self, cx: &mut App) -> Option<glim_services::paged::PageEdit> {
         if let Renderer::Paged { view, .. } = &self.renderer {
             view.update(cx, |page, _| page.save_request())
@@ -692,22 +709,45 @@ impl Reader {
 
     pub fn is_csv(&self) -> bool {
         self.csv.is_some()
+            && self.path.extension().is_some_and(|extension| {
+                extension.eq_ignore_ascii_case("csv") || extension.eq_ignore_ascii_case("tsv")
+            })
+    }
+    fn geo_format(&self) -> Option<&'static str> {
+        let extension = self.path.extension()?.to_str()?;
+        if extension.eq_ignore_ascii_case("gpx") {
+            Some("GPX")
+        } else if extension.eq_ignore_ascii_case("kml") {
+            Some("KML")
+        } else {
+            None
+        }
     }
     pub fn is_json(&self) -> bool {
         self.json.is_some()
     }
     fn restore_csv_preview(&mut self, cx: &mut App) {
         if self.csv.is_some()
-            && cx
-                .try_global::<crate::app::ReaderPreferences>()
-                .is_some_and(|prefs| prefs.csv_preview)
+            && cx.try_global::<crate::app::ReaderPreferences>().map_or(
+                self.geo_format().is_some(),
+                |prefs| {
+                    if self.geo_format().is_some() {
+                        prefs.markdown_preview
+                    } else {
+                        prefs.csv_preview
+                    }
+                },
+            )
         {
             self.set_preview(true, cx);
         }
     }
     pub fn preview_preference(&self) -> Option<&'static str> {
-        if self.csv.is_some() {
+        if self.is_csv() {
             return Some("csv");
+        }
+        if self.geo_format().is_some() {
+            return Some("markdown");
         }
         match &self.renderer {
             Renderer::Markup(m) => Some(if m.html { "html" } else { "markdown" }),
@@ -729,6 +769,7 @@ impl Reader {
             return;
         }
         if self.csv.is_some() {
+            let geo = self.geo_format();
             let text = if preview {
                 self.source().map(|s| s.state.read(cx).value().to_string())
             } else {
@@ -738,6 +779,10 @@ impl Reader {
                 *visible = preview;
                 if let Some(text) = text {
                     table.update(cx, |view, cx| {
+                        if let Some(format) = geo {
+                            view.load_geo(text, format, cx);
+                            return;
+                        }
                         view.load(
                             text,
                             if self

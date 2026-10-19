@@ -379,5 +379,20 @@
   "This file could not be rendered": "此文件渲染失败",
   "Other files remain available. Details were saved to the log.": "其他文件仍可使用，详细信息已保存到日志。",
   "Retry rendering": "重试渲染",
-  "Open logs": "打开日志"
+  "Open logs": "打开日志",
+  "Diagram page %page / %pages": "图表第 %page / %pages 页",
+  "Use the diagram page controls to render this block; its complete source remains available.": "使用图表分页控件渲染此块；完整源码仍可查看。",
+  "Open full artwork": "打开完整封面",
+  "Actual size": "原尺寸",
+  "Scaled preview": "缩放预览",
+  "Complete source is available in Source view.": "完整源码可在源码视图中查看。",
+  "Diagram source exceeds the active render budget; complete source is available in Source view.": "图表源码超出当前渲染工作预算；完整内容可在源码视图中查看。",
+  "Book metadata": "书籍信息",
+  "Full text": "完整文本",
+  "Cell": "单元格",
+  "Value": "值",
+  "Formula": "公式",
+  "Read-only worksheet cells · Saved formula results · Select a worksheet, page through cells, or double-click a value to read it in full.": "只读工作表单元格 · 显示已保存的公式结果 · 可选择工作表、翻页浏览，或双击分页查看完整值。",
+  "Cancel save": "取消保存",
+  "Copy page": "复制本页"
 }

@@ -2,13 +2,125 @@
 use crate::limits as reader_limits;
 use crate::{paged::TextPage, report::Report, work::Cancellation};
 use anyhow::{Context, Result, ensure};
-use object::{Object, ObjectSection, ObjectSegment, read::macho::FatArch};
+use object::{
+    Object, ObjectSection, ObjectSegment,
+    read::{ReadRef, macho::FatArch},
+};
 use std::{
-    collections::BTreeSet,
+    cell::{Cell, RefCell},
+    collections::{BTreeSet, HashSet},
     fmt::Write as _,
     io::{Read, Seek, SeekFrom},
     path::Path,
 };
+
+// object::ReadCache never evicts references, and its built-in C-string reader
+// stops after 4096 bytes. Bound its live blocks before allocation and scan
+// strings through shared aligned blocks, keeping full names within this budget.
+#[derive(Default)]
+struct CacheUsage {
+    bytes: u64,
+    ranges: HashSet<(u64, u64)>,
+}
+struct MetadataCache<'budget> {
+    inner: object::read::ReadCache<crate::work::Reader<std::fs::File>>,
+    usage: RefCell<CacheUsage>,
+    exhausted: &'budget Cell<bool>,
+}
+impl<'budget> MetadataCache<'budget> {
+    fn range(&self, offset: u64, size: u64) -> MetadataRange<'_, 'budget> {
+        MetadataRange {
+            cache: self,
+            offset,
+            size,
+        }
+    }
+}
+impl<'a> ReadRef<'a> for &'a MetadataCache<'_> {
+    fn len(self) -> std::result::Result<u64, ()> {
+        (&self.inner).len()
+    }
+    fn read_bytes_at(self, offset: u64, size: u64) -> std::result::Result<&'a [u8], ()> {
+        if size == 0 {
+            return Ok(&[]);
+        }
+        if offset
+            .checked_add(size)
+            .is_none_or(|end| end > self.len().unwrap_or(0))
+        {
+            return Err(());
+        }
+        let mut usage = self.usage.borrow_mut();
+        if !usage.ranges.contains(&(offset, size)) {
+            let bookkeeping = (std::mem::size_of::<(u64, u64, Box<[u8]>)>() * 4) as u64;
+            let charge = size.checked_add(bookkeeping).ok_or(())?;
+            if charge > reader_limits::IO_CACHE_BYTES.saturating_sub(usage.bytes) {
+                self.exhausted.set(true);
+                return Err(());
+            }
+            usage.bytes += charge;
+            usage.ranges.insert((offset, size));
+        }
+        drop(usage);
+        (&self.inner).read_bytes_at(offset, size)
+    }
+    fn read_bytes_at_until(
+        self,
+        range: std::ops::Range<u64>,
+        delimiter: u8,
+    ) -> std::result::Result<&'a [u8], ()> {
+        let length = self.len()?;
+        if range.start > range.end || range.end > length {
+            return Err(());
+        }
+        let mut offset = range.start;
+        while offset < range.end {
+            let block = offset / reader_limits::IO_BUFFER_BYTES as u64
+                * reader_limits::IO_BUFFER_BYTES as u64;
+            let size = (reader_limits::IO_BUFFER_BYTES as u64).min(length - block);
+            let bytes = self.read_bytes_at(block, size)?;
+            let begin = (offset - block) as usize;
+            let end = (range.end - block).min(size) as usize;
+            if let Some(index) = bytes[begin..end].iter().position(|byte| *byte == delimiter) {
+                return self.read_bytes_at(range.start, offset - range.start + index as u64);
+            }
+            offset = block + size;
+        }
+        Err(())
+    }
+}
+#[derive(Clone, Copy)]
+struct MetadataRange<'a, 'budget> {
+    cache: &'a MetadataCache<'budget>,
+    offset: u64,
+    size: u64,
+}
+impl<'a> ReadRef<'a> for MetadataRange<'a, '_> {
+    fn len(self) -> std::result::Result<u64, ()> {
+        Ok(self.size)
+    }
+    fn read_bytes_at(self, offset: u64, size: u64) -> std::result::Result<&'a [u8], ()> {
+        if offset.checked_add(size).is_none_or(|end| end > self.size) {
+            return Err(());
+        }
+        self.cache
+            .read_bytes_at(self.offset.checked_add(offset).ok_or(())?, size)
+    }
+    fn read_bytes_at_until(
+        self,
+        range: std::ops::Range<u64>,
+        delimiter: u8,
+    ) -> std::result::Result<&'a [u8], ()> {
+        if range.start > range.end || range.end > self.size {
+            return Err(());
+        }
+        self.cache.read_bytes_at_until(
+            self.offset.checked_add(range.start).ok_or(())?
+                ..self.offset.checked_add(range.end).ok_or(())?,
+            delimiter,
+        )
+    }
+}
 
 pub fn supports(path: &Path) -> bool {
     if !path.is_file() {
@@ -70,6 +182,15 @@ pub fn read_preview(path: &Path) -> Result<TextPage> {
     read_preview_cancellable(path, &Cancellation::default())
 }
 pub fn read_preview_cancellable(path: &Path, cancel: &Cancellation) -> Result<TextPage> {
+    let exhausted = Cell::new(false);
+    let result = read_report(path, cancel, &exhausted);
+    if exhausted.get() {
+        cancel.check()?;
+        return crate::paged::read_binary_page(path, 0);
+    }
+    result
+}
+fn read_report(path: &Path, cancel: &Cancellation, exhausted: &Cell<bool>) -> Result<TextPage> {
     let file = std::fs::File::open(path)?;
     let metadata = file.metadata()?;
     ensure!(
@@ -80,10 +201,14 @@ pub fn read_preview_cancellable(path: &Path, cancel: &Cancellation) -> Result<Te
     (&file)
         .take(reader_limits::EXECUTABLE_HEX_BYTES as u64)
         .read_to_end(&mut prefix)?;
-    let cache = object::read::ReadCache::new(crate::work::Reader {
-        inner: file,
-        cancel: cancel.clone(),
-    });
+    let cache = MetadataCache {
+        inner: object::read::ReadCache::new(crate::work::Reader {
+            inner: file,
+            cancel: cancel.clone(),
+        }),
+        usage: RefCell::new(CacheUsage::default()),
+        exhausted,
+    };
     let mut text = Report::new()?;
     writeln!(
         text,

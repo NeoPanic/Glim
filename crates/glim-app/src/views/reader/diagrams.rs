@@ -1,11 +1,16 @@
 use super::OpenLink;
 use glim_services::markdown_preview::{self, Diagram};
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     base::{
         InlineElement, InlineRenderContext, MarkdownExtensions, MarkdownNode, MarkdownParseContext,
         MarkdownPlugin, TextView, markdown_ast,
     },
-    component::ActiveTheme,
+    component::{
+        ActiveTheme, Disableable,
+        button::{Button, ButtonVariants},
+        h_flex,
+    },
     *,
 };
 use std::{
@@ -151,6 +156,9 @@ pub(super) struct DiagramPreview {
     pub extensions: MarkdownExtensions,
     task: Option<Task<()>>,
     cancelled: Arc<AtomicBool>,
+    text: String,
+    page: usize,
+    total: usize,
 }
 impl DiagramPreview {
     pub fn new(text: String, cx: &mut Context<Self>) -> Self {
@@ -158,11 +166,22 @@ impl DiagramPreview {
             extensions: extensions(Arc::new(HashMap::new())),
             task: None,
             cancelled: Arc::new(AtomicBool::new(false)),
+            text: String::new(),
+            page: 0,
+            total: 0,
         };
         preview.load(text, cx);
         preview
     }
     pub fn load(&mut self, text: String, cx: &mut Context<Self>) {
+        self.text = text;
+        self.page = 0;
+        self.total = 0;
+        self.load_page(cx);
+    }
+    fn load_page(&mut self, cx: &mut Context<Self>) {
+        let text = self.text.clone();
+        let page = self.page;
         self.cancelled.store(true, Ordering::Relaxed);
         self.cancelled = Arc::new(AtomicBool::new(false));
         self.extensions = extensions(Arc::new(HashMap::new()));
@@ -185,7 +204,7 @@ impl DiagramPreview {
                 };
                 pending.lock().unwrap().insert(diagram, preview);
             };
-            let result = markdown_preview::render(&text, &cancelled, publish);
+            let result = markdown_preview::render_page(&text, page, &cancelled, publish);
             completed.store(true, Ordering::Release);
             (result, text)
         });
@@ -211,6 +230,7 @@ impl DiagramPreview {
             }
             let (result, text) = work.await;
             snapshot.extend(std::mem::take(&mut *updates.lock().unwrap()));
+            let total = result.as_ref().copied().unwrap_or(0);
             if let Err(error) = result {
                 for diagram in markdown_preview::collect(&text).unwrap_or_default() {
                     snapshot
@@ -221,10 +241,58 @@ impl DiagramPreview {
             let _ = view.update(cx, |view, cx| {
                 view.extensions = extensions(Arc::new(snapshot));
                 view.task = None;
+                view.total = total;
                 cx.notify();
             });
         }));
         cx.notify();
+    }
+    pub fn controls(view: &Entity<Self>, cx: &mut App) -> Option<AnyElement> {
+        let current = view.read(cx);
+        let pages = current.total.div_ceil(markdown_preview::MAX_DIAGRAMS);
+        if pages <= 1 {
+            return None;
+        }
+        let page = current.page;
+        let busy = current.task.is_some();
+        let previous = view.clone();
+        let next = view.clone();
+        Some(
+            h_flex()
+                .p_2()
+                .gap_2()
+                .text_xs()
+                .child(
+                    glim_services::locale::tr("Diagram page %page / %pages")
+                        .replace("%page", &(page + 1).to_string())
+                        .replace("%pages", &pages.to_string()),
+                )
+                .child(
+                    Button::new("diagram-previous")
+                        .ghost()
+                        .label(glim_services::locale::tr("Previous"))
+                        .disabled(busy || page == 0)
+                        .on_click(move |_, _, cx| {
+                            previous.update(cx, |v, cx| {
+                                v.page = v.page.saturating_sub(1);
+                                v.load_page(cx);
+                            })
+                        }),
+                )
+                .child(
+                    Button::new("diagram-next")
+                        .ghost()
+                        .label(glim_services::locale::tr("Next page"))
+                        .disabled(busy || page + 1 >= pages)
+                        .on_click(move |_, _, cx| {
+                            next.update(cx, |v, cx| {
+                                v.page += 1;
+                                v.load_page(cx);
+                            })
+                        }),
+                )
+                .into_any_element(),
+        )
     }
 }
 impl Drop for DiagramPreview {
@@ -325,14 +393,28 @@ impl MarkdownPlugin for DiagramPlugin {
                         .into_any_element()
                 }
             }
-            Preview::Error(error) => div()
-                .w_full()
-                .p_3()
-                .bg(cx.theme().muted)
-                .text_color(cx.theme().muted_foreground)
-                .child(div().text_sm().child(error.clone()))
-                .child(div().mt_2().child(data.source.clone()))
-                .into_any_element(),
+            Preview::Error(error) => {
+                let mut end = data
+                    .source
+                    .len()
+                    .min(glim_services::limits::TEXT_LAYOUT_RUN_BYTES);
+                while !data.source.is_char_boundary(end) {
+                    end -= 1;
+                }
+                div()
+                    .w_full()
+                    .p_3()
+                    .bg(cx.theme().muted)
+                    .text_color(cx.theme().muted_foreground)
+                    .child(div().text_sm().child(error.clone()))
+                    .child(div().mt_2().child(data.source[..end].to_owned()))
+                    .when(end < data.source.len(), |view| {
+                        view.child(glim_services::locale::tr(
+                            "Complete source is available in Source view.",
+                        ))
+                    })
+                    .into_any_element()
+            }
             Preview::Pending => div()
                 .text_color(cx.theme().muted_foreground)
                 .child(if data.inline {

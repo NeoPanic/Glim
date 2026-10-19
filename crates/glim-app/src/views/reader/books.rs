@@ -10,7 +10,7 @@ use glim_services::{
     locale::tr,
 };
 use gpui_kit::{
-    base::{TextView, TextViewState, TextViewStyle},
+    base::{InteractiveElementExt as _, TextView, TextViewState, TextViewStyle},
     component::{
         ActiveTheme, Disableable, Selectable, Sizable,
         button::{Button, ButtonVariants},
@@ -29,10 +29,22 @@ use std::{
     },
 };
 
+fn book_label(text: &str) -> String {
+    let mut label: String = text
+        .chars()
+        .take(reader_limits::BOOK_STATE_LABEL_CHARS)
+        .collect();
+    if label.len() < text.len() {
+        label.push('…');
+    }
+    label
+}
+
 pub(super) struct BookReader {
     book: Arc<Book>,
     state: ReadingState,
     text: Option<Entity<TextViewState>>,
+    paged: Option<Entity<super::paged::PagedReader>>,
     images: Arc<HashMap<String, Arc<Image>>>,
     missing: Arc<Image>,
     comic: Option<Arc<Image>>,
@@ -59,13 +71,15 @@ impl BookReader {
         window.focus(&focus, cx);
         let book = Arc::new(book);
         let initial = book.clone();
+        let (cancel, guard) = glim_services::work::Cancellation::task();
         let work = cx.background_executor().spawn(async move {
             let mut state = books::preferences::read(&initial.fingerprint).unwrap_or_default();
             state.chapter = state.chapter.min(initial.chapters.len() - 1);
-            let content = books::chapter(&initial, state.chapter)?;
+            let content = books::chapter_cancellable(&initial, state.chapter, &cancel)?;
             Ok::<_, anyhow::Error>((state, content))
         });
         let task = cx.spawn(async move |view, cx| {
+            let _guard = guard;
             let result = work.await;
             let _ = view.update(cx, |view, cx| {
                 view.loading = false;
@@ -83,6 +97,7 @@ impl BookReader {
             book,
             state: ReadingState::default(),
             text: None,
+            paged: None,
             images: Arc::new(HashMap::new()),
             missing: Arc::new(Image::from_bytes(ImageFormat::Png, books::missing_image())),
             comic: None,
@@ -104,7 +119,11 @@ impl BookReader {
             _subscription: None,
         }
     }
-    fn install(&mut self, content: ChapterContent, cx: &mut Context<Self>) {
+    fn install(&mut self, mut content: ChapterContent, cx: &mut Context<Self>) {
+        self.paged = content
+            .page
+            .take()
+            .map(|page| cx.new(|_| super::paged::PagedReader::readonly(page)));
         self.images = Arc::new(
             content
                 .images
@@ -145,10 +164,12 @@ impl BookReader {
         self.error = None;
         self.save(cx);
         let book = self.book.clone();
+        let (cancel, guard) = glim_services::work::Cancellation::task();
         let work = cx
             .background_executor()
-            .spawn(async move { books::chapter(&book, index) });
+            .spawn(async move { books::chapter_cancellable(&book, index, &cancel) });
         self.task = Some(cx.spawn(async move |view, cx| {
+            let _guard = guard;
             let result = work.await;
             let _ = view.update(cx, |view, cx| {
                 view.task = None;
@@ -441,14 +462,17 @@ impl Render for BookReader {
                             })),
                     )
                     .child(
-                        v_flex()
+                        v_flex().id("book-metadata")
+                            .on_double_click(cx.listener(|view, _, window, cx| {
+                                super::source::show_text_dialog(tr("Book metadata"), format!("{}\n\n{}", view.book.title, view.book.author), window, cx);
+                            }))
                             .flex_1()
                             .min_w_0()
                             .child(
                                 div()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .truncate()
-                                    .child(self.book.title.clone()),
+                                    .child(book_label(&self.book.title)),
                             )
                             .child(
                                 div()
@@ -458,7 +482,7 @@ impl Render for BookReader {
                                     .child(format!(
                                         "{} · {}",
                                         self.book.format.label(),
-                                        self.book.author
+                                        book_label(&self.book.author)
                                     )),
                             ),
                     )
@@ -630,14 +654,17 @@ impl Render for BookReader {
                                                                 None,
                                                             )
                                                         };
-                                                    Button::new(("book-toc-item", i))
+                                                    let label = book_label(&title);
+                                                    let shortened = label != title;
+                                                    let full = title.clone();
+                                                    let entry = Button::new(("book-toc-item", i))
                                                         .ghost()
-                                                        .label(title.clone())
-                                                        .tooltip(title)
-                                                        .w_full()
+                                                        .label(label.clone())
+                                                        .tooltip(label)
+                                                        .flex_1().min_w_0()
                                                         .h(px(36.))
                                                         .justify_start()
-                                                        .pl(px(12. + depth as f32 * 12.))
+                                                        .pl(px(12. + depth.min(reader_limits::BOOK_TOC_DEPTH) as f32 * 12.))
                                                         .on_click(cx.listener(
                                                             move |v, _, _, cx| {
                                                                 if let Some((chapter, fraction)) =
@@ -651,6 +678,12 @@ impl Render for BookReader {
                                                                 }
                                                             },
                                                         ))
+;
+                                                    h_flex().w_full().min_w_0().child(entry)
+                                                        .when(shortened, |row| row.child(Button::new(("book-full-label", i)).ghost().small().label("…")
+                                                            .tooltip(tr("Full text")).on_click(cx.listener(move |_, _, window, cx| {
+                                                                super::source::show_text_dialog(tr("Full text"), full.clone(), window, cx);
+                                                            }))))
                                                         .into_any_element()
                                                 })
                                                 .collect()
@@ -735,7 +768,23 @@ impl Render for BookReader {
                                         .size_full(),
                                     ),
                             )
-                            .child(Scrollbar::vertical(&self.scroll)),
+                            .when(self.paged.is_none(), |view| {
+                                view.child(Scrollbar::vertical(&self.scroll))
+                            })
+                            .when_some(
+                                self.paged
+                                    .clone()
+                                    .filter(|_| !self.loading && self.error.is_none()),
+                                |view, page| {
+                                    view.child(
+                                        div()
+                                            .absolute()
+                                            .size_full()
+                                            .bg(cx.theme().background)
+                                            .child(page),
+                                    )
+                                },
+                            ),
                     ),
             )
             .child(

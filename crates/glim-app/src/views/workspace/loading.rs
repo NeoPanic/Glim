@@ -740,7 +740,7 @@ fn read_content_inner(
             .map(Content::Page);
     }
     if glim_services::books::supports(path) {
-        return glim_services::books::read(path).map(Content::Book);
+        return glim_services::books::read_cancellable(path, cancel).map(Content::Book);
     }
     if glim_services::xmind::supports(path) {
         return match glim_services::xmind::read(path) {
@@ -789,22 +789,30 @@ fn read_content_inner(
             {
                 Ok(Content::Page(first))
             } else {
-                read_document(path).map(|d| {
-                    if d.text
-                        .lines()
-                        .any(|line| line.len() > reader_limits::TEXT_LINE_BYTES)
-                        || d.text
-                            .bytes()
-                            .filter(|b| *b == b'\n')
-                            .take(reader_limits::TEXT_EDITABLE_NEWLINES + 1)
-                            .count()
-                            > reader_limits::TEXT_EDITABLE_NEWLINES
-                    {
-                        Content::Page(first)
-                    } else {
-                        Content::File(d)
-                    }
-                })
+                read_document(path)
+                    .map(|d| {
+                        if d.text
+                            .lines()
+                            .any(|line| line.len() > reader_limits::TEXT_LINE_BYTES)
+                            || d.text
+                                .bytes()
+                                .filter(|b| *b == b'\n')
+                                .take(reader_limits::TEXT_EDITABLE_NEWLINES + 1)
+                                .count()
+                                > reader_limits::TEXT_EDITABLE_NEWLINES
+                        {
+                            Content::Page(first)
+                        } else {
+                            Content::File(d)
+                        }
+                    })
+                    .or_else(|error| {
+                        if error.is::<reader_limits::PreviewBudgetExceeded>() {
+                            glim_services::paged::read_page(path, 0, false).map(Content::Page)
+                        } else {
+                            Err(error)
+                        }
+                    })
             }
         })()
     };

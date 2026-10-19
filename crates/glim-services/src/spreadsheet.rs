@@ -1,109 +1,323 @@
-//! Local, read-only spreadsheet preview. Formula results are never recalculated.
-use crate::limits as reader_limits;
+//! Stream XLSX cells into a disk-backed index; legacy XLS uses native Quick Look.
+//! Stored formula results are displayed without evaluating workbook code.
+use crate::{limits, work::Cancellation};
 use anyhow::{Context, Result, ensure};
-use calamine::{Reader, open_workbook_auto};
-use std::path::Path;
+use quick_xml::{Reader, events::Event};
+use rusqlite::{Connection, params};
+use std::{
+    fs::File,
+    io::BufReader,
+    path::{Path, PathBuf},
+};
 
-fn escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
+pub struct Spreadsheet {
+    pub database: PathBuf,
+    pub information: String,
+    _directory: tempfile::TempDir,
+}
+fn connection(path: &Path) -> Result<Connection> {
+    let db = Connection::open(path)?;
+    db.pragma_update(None, "cache_size", -limits::SQLITE_CACHE_KIB)?;
+    db.pragma_update(None, "temp_store", "FILE")?;
+    db.execute_batch("PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;")?;
+    Ok(db)
+}
+fn scan(
+    archive: &mut zip::ZipArchive<File>,
+    name: &str,
+    cancel: &Cancellation,
+    mut visit: impl FnMut(&Event<'_>, quick_xml::encoding::Decoder) -> Result<()>,
+) -> Result<()> {
+    let entry = archive
+        .by_name(name)
+        .with_context(|| format!("Missing worksheet resource: {name}"))?;
+    let input = crate::work::RecordReader::new(entry, limits::IO_RECORD_BYTES, cancel);
+    let mut reader = Reader::from_reader(BufReader::with_capacity(limits::IO_BUFFER_BYTES, input));
+    let mut buffer = Vec::new();
+    loop {
+        cancel.check()?;
+        buffer.clear();
+        reader.get_mut().get_mut().reset(limits::IO_RECORD_BYTES);
+        let event = reader.read_event_into(&mut buffer)?;
+        if matches!(event, Event::DocType(_)) {
+            anyhow::bail!("Spreadsheet external entities are unsupported");
+        }
+        if matches!(event, Event::Eof) {
+            break;
+        }
+        visit(&event, reader.decoder())?;
+    }
+    Ok(())
+}
+fn attributes(
+    tag: &quick_xml::events::BytesStart<'_>,
+    decoder: quick_xml::encoding::Decoder,
+) -> Result<Vec<(String, String)>> {
+    tag.attributes()
+        .map(|attribute| {
+            let attribute = attribute?;
+            Ok((
+                String::from_utf8_lossy(attribute.key.local_name().as_ref()).into_owned(),
+                attribute.decode_and_unescape_value(decoder)?.into_owned(),
+            ))
+        })
+        .collect()
+}
+fn attr<'a>(attributes: &'a [(String, String)], name: &str) -> &'a str {
+    attributes
+        .iter()
+        .find(|(key, _)| key == name)
+        .map_or("", |(_, value)| value)
+}
+fn append(value: &mut String, text: &str) -> Result<()> {
+    limits::preview_budget(
+        value.len().saturating_add(text.len()) <= limits::IO_RECORD_BYTES,
+        "Active spreadsheet value exceeds structured preview memory; use the native document preview",
+    )?;
+    value.push_str(text);
+    Ok(())
+}
+pub fn prepare(path: &Path, cancel: &Cancellation) -> Result<Option<Spreadsheet>> {
+    match prepare_index(path, cancel) {
+        Err(error) => {
+            cancel.check()?;
+            log::warn!("XLSX index unavailable; using native preview: {error:#}");
+            Ok(None)
+        }
+        result => result,
+    }
+}
+fn prepare_index(path: &Path, cancel: &Cancellation) -> Result<Option<Spreadsheet>> {
+    if !path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("xlsx"))
+    {
+        return Ok(None);
+    }
+    let before = std::fs::metadata(path)?;
+    let mut archive = zip::ZipArchive::new(File::open(path)?)?;
+    let directory = tempfile::tempdir()?;
+    let database = directory.path().join("worksheets.sqlite");
+    let output = connection(&database)?;
+    let cache = connection(&directory.path().join("strings.sqlite"))?;
+    cache.execute_batch("CREATE TABLE strings (id INTEGER PRIMARY KEY, value TEXT); CREATE TABLE relationships(id TEXT PRIMARY KEY, target TEXT); CREATE TABLE sheets(id INTEGER PRIMARY KEY, name TEXT, reference TEXT);")?;
+    cache.execute_batch("BEGIN")?;
+    if archive
+        .file_names()
+        .any(|name| name == "xl/sharedStrings.xml")
+    {
+        let (mut value, mut id, mut in_text) = (String::new(), 0_i64, false);
+        let mut phonetic = 0_usize;
+        scan(&mut archive, "xl/sharedStrings.xml", cancel, |event, _| {
+            match event {
+                Event::Start(tag) if tag.local_name().as_ref() == b"si" => value.clear(),
+                Event::Start(tag) if tag.local_name().as_ref() == b"rPh" => phonetic += 1,
+                Event::End(tag) if tag.local_name().as_ref() == b"rPh" => {
+                    phonetic = phonetic.saturating_sub(1)
+                }
+                Event::Start(tag) if tag.local_name().as_ref() == b"t" => in_text = phonetic == 0,
+                Event::End(tag) if tag.local_name().as_ref() == b"t" => in_text = false,
+                event if in_text => {
+                    if let Some(text) = crate::xml::event_text(event)? {
+                        append(&mut value, &text)?;
+                    }
+                }
+                Event::End(tag) if tag.local_name().as_ref() == b"si" => {
+                    cache.execute("INSERT INTO strings VALUES (?1, ?2)", params![id, value])?;
+                    id += 1;
+                }
+                Event::Empty(tag) if tag.local_name().as_ref() == b"si" => {
+                    cache.execute("INSERT INTO strings VALUES (?1, '')", [id])?;
+                    id += 1;
+                }
+                _ => {}
+            }
+            Ok(())
+        })?;
+    }
+    scan(
+        &mut archive,
+        "xl/_rels/workbook.xml.rels",
+        cancel,
+        |event, decoder| {
+            if let Event::Start(tag) | Event::Empty(tag) = event
+                && tag.local_name().as_ref() == b"Relationship"
+            {
+                let a = attributes(tag, decoder)?;
+                if attr(&a, "TargetMode") != "External" {
+                    cache.execute(
+                        "INSERT INTO relationships VALUES (?1, ?2)",
+                        params![attr(&a, "Id"), attr(&a, "Target")],
+                    )?;
+                }
+            }
+            Ok(())
+        },
+    )?;
+    scan(&mut archive, "xl/workbook.xml", cancel, |event, decoder| {
+        if let Event::Start(tag) | Event::Empty(tag) = event
+            && tag.local_name().as_ref() == b"sheet"
+        {
+            let a = attributes(tag, decoder)?;
+            cache.execute(
+                "INSERT INTO sheets(name,reference) VALUES (?1, ?2)",
+                params![attr(&a, "name"), attr(&a, "id")],
+            )?;
+        }
+        Ok(())
+    })?;
+    cache.execute_batch("COMMIT")?;
+    let mut sheets = cache.prepare("SELECT s.id,s.name,r.target FROM sheets s JOIN relationships r ON r.id=s.reference ORDER BY s.id")?;
+    let mut rows = sheets.query([])?;
+    let mut count = 0;
+    output.execute_batch("BEGIN")?;
+    while let Some(sheet) = rows.next()? {
+        cancel.check()?;
+        let id: i64 = sheet.get(0)?;
+        let name: String = sheet.get(1)?;
+        let target: String = sheet.get(2)?;
+        let member =
+            crate::books::resolve("xl/workbook.xml", &target).context("Invalid worksheet path")?;
+        let table = format!("{id}: {name}");
+        let quoted = format!("\"{}\"", table.replace('"', "\"\""));
+        let fields = [
+            crate::locale::tr("Cell"),
+            crate::locale::tr("Value"),
+            crate::locale::tr("Formula"),
+        ]
+        .into_iter()
+        .map(|name| format!("\"{}\" TEXT", name.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(",");
+        output.execute_batch(&format!("CREATE TABLE {quoted} ({fields})"))?;
+        let mut insert = output.prepare(&format!("INSERT INTO {quoted} VALUES (?1,?2,?3)"))?;
+        let (mut cell, mut kind, mut value, mut formula, mut field) = (
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        );
+        let mut in_cell = false;
+        let (mut row_number, mut column_number) = (0_u64, 0_u64);
+        let mut phonetic = 0_usize;
+        scan(
+            &mut archive,
+            member.trim_start_matches('/'),
+            cancel,
+            |event, decoder| {
+                match event {
+                    Event::Start(tag) | Event::Empty(tag)
+                        if tag.local_name().as_ref() == b"row" =>
+                    {
+                        let a = attributes(tag, decoder)?;
+                        row_number = attr(&a, "r")
+                            .parse()
+                            .unwrap_or_else(|_| row_number.saturating_add(1));
+                        column_number = 0;
+                    }
+                    Event::Empty(tag) if tag.local_name().as_ref() == b"c" => {
+                        let a = attributes(tag, decoder)?;
+                        let address =
+                            cell_address(attr(&a, "r"), row_number.max(1), &mut column_number);
+                        insert.execute(params![address, "", ""])?;
+                    }
+                    Event::Start(tag) if tag.local_name().as_ref() == b"c" => {
+                        let a = attributes(tag, decoder)?;
+                        cell = cell_address(attr(&a, "r"), row_number.max(1), &mut column_number);
+                        kind = attr(&a, "t").to_owned();
+                        value.clear();
+                        formula.clear();
+                        field.clear();
+                        in_cell = true;
+                    }
+                    Event::Start(tag) if tag.local_name().as_ref() == b"rPh" => phonetic += 1,
+                    Event::End(tag) if tag.local_name().as_ref() == b"rPh" => {
+                        phonetic = phonetic.saturating_sub(1)
+                    }
+                    Event::Start(tag)
+                        if in_cell
+                            && phonetic == 0
+                            && matches!(tag.local_name().as_ref(), b"v" | b"t" | b"f") =>
+                    {
+                        field = String::from_utf8_lossy(tag.local_name().as_ref()).into_owned()
+                    }
+                    Event::End(tag) if matches!(tag.local_name().as_ref(), b"v" | b"t" | b"f") => {
+                        field.clear()
+                    }
+                    event @ (Event::Text(_) | Event::CData(_) | Event::GeneralRef(_))
+                        if in_cell && phonetic == 0 && !field.is_empty() =>
+                    {
+                        let text = crate::xml::event_text(event)?.unwrap_or_default();
+                        append(
+                            if field == "f" {
+                                &mut formula
+                            } else {
+                                &mut value
+                            },
+                            &text,
+                        )?;
+                    }
+                    Event::End(tag) if tag.local_name().as_ref() == b"c" => {
+                        if kind == "s" && !value.is_empty() {
+                            value = cache.query_row(
+                                "SELECT value FROM strings WHERE id=?1",
+                                [value.parse::<i64>()?],
+                                |row| row.get(0),
+                            )?;
+                        }
+                        insert.execute(params![cell, value, formula])?;
+                        in_cell = false;
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+        )?;
+        count += 1;
+    }
+    ensure!(count > 0, "Spreadsheet contains no supported worksheets");
+    output.execute_batch("COMMIT")?;
+    drop(output);
+    let after = std::fs::metadata(path)?;
+    ensure!(
+        (before.len(), before.modified().ok()) == (after.len(), after.modified().ok()),
+        "Spreadsheet changed; reopen it"
+    );
+    Ok(Some(Spreadsheet {
+        database,
+        information: crate::locale::tr(
+            "Read-only worksheet cells · Saved formula results · Select a worksheet, page through cells, or double-click a value to read it in full.",
+        ),
+        _directory: directory,
+    }))
 }
 
-pub fn preview(path: &Path) -> Result<String> {
-    ensure!(
-        std::fs::metadata(path)?.len() <= reader_limits::SPREADSHEET_INPUT_BYTES,
-        "Spreadsheet exceeds the preview input size limit"
-    );
-    let mut workbook = open_workbook_auto(path)
-        .context("Cannot decode spreadsheet; the file may be damaged, encrypted or unsupported")?;
-    let names = workbook.sheet_names().to_vec();
-    ensure!(!names.is_empty(), "Spreadsheet contains no worksheets");
-    let mut html = String::from(
-        r#"<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>
-:root{color-scheme:light dark}body{font:14px -apple-system,BlinkMacSystemFont,sans-serif;margin:20px;color:CanvasText;background:Canvas}p{color:GrayText}details{margin:16px 0;border:1px solid GrayText;border-radius:8px;overflow:hidden}summary{padding:12px;font-weight:600;cursor:pointer;background:color-mix(in srgb,CanvasText 5%,Canvas)}.grid{overflow:auto;max-height:70vh}table{border-collapse:separate;border-spacing:0;table-layout:fixed;width:max-content}th,td{box-sizing:border-box;border-right:1px solid GrayText;border-bottom:1px solid GrayText;padding:8px 12px;min-width:160px;max-width:320px;white-space:pre-wrap;overflow-wrap:anywhere;vertical-align:top}th{position:sticky;top:0;background:Canvas;z-index:1}th:first-child{min-width:64px}td{width:240px}tr:nth-child(even){background:color-mix(in srgb,CanvasText 3%,Canvas)}</style></head><body><p>__PREVIEW_NOTE__</p>"#,
-    );
-    html = html.replace("__PREVIEW_NOTE__", &escape(&crate::locale::tr("Read-only preview · Formulas show saved results without recalculation · Open in the default app for charts and original layout")));
-    for (index, name) in names
-        .iter()
-        .take(reader_limits::SPREADSHEET_SHEETS)
-        .enumerate()
-    {
-        let range = workbook
-            .worksheet_range(name)
-            .with_context(|| format!("Cannot decode worksheet {name}"))?;
-        let (rows, cols) = range.get_size();
-        html.push_str(&format!(
-            "<details {}><summary>{} · {} {} × {} {}</summary>",
-            if index == 0 { "open" } else { "" },
-            escape(name),
-            rows,
-            escape(&crate::locale::tr("rows")),
-            cols,
-            escape(&crate::locale::tr("columns"))
-        ));
-        if rows > reader_limits::SPREADSHEET_ROWS || cols > reader_limits::SPREADSHEET_COLUMNS {
-            html.push_str(&format!(
-                "<p>{}</p>",
-                escape(
-                    &crate::locale::tr("Preview limited to %rows rows and %columns columns.")
-                        .replace("%rows", &reader_limits::SPREADSHEET_ROWS.to_string())
-                        .replace("%columns", &reader_limits::SPREADSHEET_COLUMNS.to_string())
-                )
-            ));
-        }
-        html.push_str(&format!(
-            "<div class=grid><table><thead><tr><th>{}</th>",
-            escape(&crate::locale::tr("Row"))
-        ));
-        for column in 0..cols.min(reader_limits::SPREADSHEET_COLUMNS) {
-            html.push_str(&format!("<th>{}</th>", column + 1));
-        }
-        html.push_str("</tr></thead><tbody>");
-        let mut characters = 0;
-        for (row_index, row) in range
-            .rows()
-            .take(reader_limits::SPREADSHEET_ROWS)
-            .enumerate()
-        {
-            html.push_str(&format!("<tr><th>{}</th>", row_index + 1));
-            for cell in row.iter().take(reader_limits::SPREADSHEET_COLUMNS) {
-                let value = cell.to_string();
-                characters += value.len();
-                ensure!(
-                    characters <= reader_limits::SPREADSHEET_SHEET_TEXT_BYTES,
-                    "Worksheet text exceeds the preview budget"
-                );
-                let excerpt: String = value
-                    .chars()
-                    .take(reader_limits::SPREADSHEET_CELL_CHARS)
-                    .collect();
-                html.push_str("<td>");
-                html.push_str(&escape(&excerpt));
-                if value.chars().count() > reader_limits::SPREADSHEET_CELL_CHARS {
-                    html.push('…');
-                }
-                html.push_str("</td>");
-            }
-            html.push_str("</tr>");
-        }
-        html.push_str("</tbody></table></div></details>");
-        ensure!(
-            html.len() <= reader_limits::SPREADSHEET_HTML_BYTES,
-            "Spreadsheet HTML exceeds the preview budget"
-        );
+fn cell_address(explicit: &str, row: u64, column: &mut u64) -> String {
+    if !explicit.is_empty() {
+        let index = explicit
+            .bytes()
+            .take_while(u8::is_ascii_alphabetic)
+            .try_fold(0_u64, |value, byte| {
+                value
+                    .checked_mul(26)?
+                    .checked_add(u64::from(byte.to_ascii_uppercase() - b'A' + 1))
+            });
+        *column = index
+            .filter(|index| *index > 0)
+            .unwrap_or_else(|| column.saturating_add(1));
+        return explicit.to_owned();
     }
-    if names.len() > reader_limits::SPREADSHEET_SHEETS {
-        html.push_str(&format!(
-            "<p>{}</p>",
-            escape(
-                &crate::locale::tr("Preview limited to %sheets worksheets.")
-                    .replace("%sheets", &reader_limits::SPREADSHEET_SHEETS.to_string())
-            )
-        ));
+    let mut index = *column;
+    *column = column.saturating_add(1);
+    let mut letters = Vec::new();
+    loop {
+        letters.push(char::from(b'A' + (index % 26) as u8));
+        index /= 26;
+        if index == 0 {
+            break;
+        }
+        index -= 1;
     }
-    html.push_str("</body></html>");
-    Ok(html)
+    format!("{}{row}", letters.into_iter().rev().collect::<String>())
 }

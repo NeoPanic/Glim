@@ -16,6 +16,10 @@ pub enum Compression {
     Gzip,
     Bzip2,
     Xz,
+    Slice {
+        offset: u64,
+        length: u64,
+    },
     Zip {
         offset: u64,
         compressed: u64,
@@ -34,6 +38,7 @@ pub struct StreamedText {
     pub start: u64,
     pub end: u64,
     pub complete: bool,
+    restart: bool,
     stamp: (u64, Option<SystemTime>),
 }
 impl StreamedText {
@@ -47,6 +52,11 @@ impl StreamedText {
             cancel,
         };
         Ok(match compression {
+            Compression::Slice { offset, length } => {
+                let mut input = input;
+                input.inner.seek(SeekFrom::Start(offset))?;
+                Box::new(input.take(length))
+            }
             Compression::Zip {
                 offset,
                 compressed,
@@ -88,6 +98,7 @@ impl StreamedText {
             start: 0,
             end: 0,
             complete: false,
+            restart: false,
             stamp: (meta.len(), meta.modified().ok()),
         })
     }
@@ -102,6 +113,9 @@ impl StreamedText {
             .lock()
             .map_err(|_| anyhow::anyhow!("Reader interrupted"))? = self.lifetime.linked(operation);
         let result = self.fill(start, length, operation);
+        if result.is_err() {
+            self.restart = true;
+        }
         *self
             .cancel
             .lock()
@@ -115,11 +129,12 @@ impl StreamedText {
             "Compressed source changed; reopen it"
         );
         let wanted = start.checked_add(length).context("Page offset overflow")?;
-        if start < self.start {
+        if self.restart || start < self.start {
             self.reader = Self::open(&self.path, self.compression, self.cancel.clone())?;
             self.start = 0;
             self.end = 0;
             self.complete = false;
+            self.restart = false;
             self.file.as_file().set_len(0)?;
         }
         if !self.complete && wanted > self.end {

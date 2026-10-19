@@ -20,6 +20,16 @@ impl Workspace {
             || self.tabs.iter().any(|r| r.is_persisting_book())
     }
 
+    pub(super) fn cancel_save(&mut self, cx: &mut Context<Self>) {
+        self.save_cancel = None;
+        if let Some(id) = self.saving {
+            self.save_queue.retain(|queued| *queued != id);
+            if let Some((_, pending)) = self.autosave.get_mut(&id) {
+                *pending = None;
+            }
+        }
+        cx.notify();
+    }
     pub(super) fn save_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(editor) = self.active_reader().and_then(|r| r.editor()) {
             self.save_editor(editor.entity_id(), window, cx);
@@ -89,13 +99,16 @@ impl Workspace {
         self.error = None;
         // A pre-save read must not arrive later and replace the just-saved buffer.
         self.refresh_task = None;
+        let (cancel, guard) = glim_services::work::Cancellation::task();
+        self.save_cancel = Some(guard);
         let work = cx.background_executor().spawn(async move {
             let _scope = glim_services::diagnostics::FileScope::enter(&path, "save");
             log::info!("save begin file={}", path.display());
             let result = if let Some(page) = page {
-                glim_services::paged::save_page(&page, &text).map(Some)
+                glim_services::paged::save_page_cancellable(&page, &text, &cancel).map(Some)
             } else {
-                glim_services::files::save_document(&path, &expected, &text).map(|()| None)
+                glim_services::files::save_document_cancellable(&path, &expected, &text, &cancel)
+                    .map(|()| None)
             };
             match &result {
                 Ok(_) => log::info!("save complete file={}", path.display()),
@@ -106,6 +119,7 @@ impl Workspace {
         self.save_task = Some(cx.spawn_in(window, async move |view, cx| {
             let (text, result) = work.await;
             let _ = view.update_in(cx, |v, window, cx| {
+                let cancelled = v.save_cancel.take().is_none();
                 v.saving = None;
                 match result {
                     Ok(page) => {
@@ -130,7 +144,9 @@ impl Workspace {
                         {
                             reader.finish_page_save();
                         }
-                        v.error = Some(format!("Save failed: {error:#}").into());
+                        if !cancelled {
+                            v.error = Some(format!("Save failed: {error:#}").into());
+                        }
                     }
                 }
                 while v.saving.is_none() {

@@ -15,8 +15,17 @@ private final class ImagePreviewHost: NSView {
     }
 }
 
+private final class ImageDecodeToken {
+    private let lock = NSLock()
+    private var stopped = false
+    func cancel() { lock.lock(); stopped = true; lock.unlock() }
+    var cancelled: Bool { lock.lock(); defer { lock.unlock() }; return stopped }
+}
+
 // ImageIO retains a file-backed source; only the requested page is decoded.
 final class ImagePreview: NSObject {
+    private static let decodeQueue = DispatchQueue(label: "glim.image.decode", qos: .userInitiated)
+    private var decodeToken: ImageDecodeToken?
     let view: NSView = ImagePreviewHost()
     private let scroll = NSScrollView()
     private let imageView = NSImageView()
@@ -27,8 +36,9 @@ final class ImagePreview: NSObject {
     private var needsInitialFit = false
     private let previous = NSButton(title: L("Previous page"), target: nil, action: nil)
     private let next = NSButton(title: L("Next page"), target: nil, action: nil)
-    private let resolution = NSButton(title: L("Original resolution"), target: nil, action: nil)
+    private let resolution = NSButton(title: L("Actual size"), target: nil, action: nil)
     private let url: URL
+    private let sourceSize: NSSize?
     private var page = 0
     private var count = 0
     private var original = false
@@ -36,8 +46,8 @@ final class ImagePreview: NSObject {
     private var task: DispatchWorkItem?
     private var closed = false
     private var quickLook: QLPreviewView?
-    init(url: URL) {
-        self.url = url
+    init(url: URL, sourceSize: NSSize? = nil) {
+        self.url = url; self.sourceSize = sourceSize
         super.init()
         let stack = NSStackView(); stack.orientation = .vertical; stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
@@ -73,7 +83,7 @@ final class ImagePreview: NSObject {
     private func controls(_ busy: Bool) {
         previous.isEnabled = !busy && page > 0; next.isEnabled = !busy && page + 1 < count
         resolution.isEnabled = !busy && quickLook == nil
-        resolution.title = original ? L("Fit image") : L("Original resolution")
+        resolution.title = original ? L("Fit image") : L("Actual size")
     }
     private func fitWhenReady() {
         guard needsInitialFit, view.window != nil, imageView.image != nil else { return }
@@ -87,20 +97,27 @@ final class ImagePreview: NSObject {
         loading.isHidden = true; progress.stopAnimation(nil)
     }
     private func load() {
-        task?.cancel(); generation += 1
-        let generation = generation, page = page, original = original, url = url
+        decodeToken?.cancel(); task?.cancel(); generation += 1
+        let token = ImageDecodeToken(); decodeToken = token
+        let generation = generation, page = page, original = original, url = url, sourceSize = sourceSize
         needsInitialFit = false; imageView.image = nil
         loadingLabel.stringValue = L("Loading preview…")
         loading.isHidden = false; progress.startAnimation(nil)
         status.stringValue = L("Loading preview…"); controls(true)
         let work = DispatchWorkItem { [weak self] in
+            guard !token.cancelled else { return }
             let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
             let count = source.map(CGImageSourceGetCount) ?? 0
             let props = source.flatMap { CGImageSourceCopyPropertiesAtIndex($0, page, nil) as? [CFString: Any] }
-            let width = (props?[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? 1
-            let height = (props?[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? 1
-            let edge = original ? max(width, height) : min(max(width, height), Double(ReaderLimits.IMAGE_PREVIEW_EDGE))
-            let image = source.flatMap { CGImageSourceCreateThumbnailAtIndex($0, page, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: edge, kCGImageSourceShouldCacheImmediately: true] as CFDictionary) }
+            let rasterWidth = (props?[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? 1
+            let rasterHeight = (props?[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? 1
+            let width = sourceSize.map { Double($0.width) } ?? rasterWidth
+            let height = sourceSize.map { Double($0.height) } ?? rasterHeight
+            let budgetEdge = max(1, floor(sqrt(Double(ReaderLimits.IMAGE_DECODED_BYTES) / 4)))
+            let edge = min(max(rasterWidth, rasterHeight), budgetEdge, original ? budgetEdge : Double(ReaderLimits.IMAGE_PREVIEW_EDGE))
+            guard !token.cancelled else { return }
+            let image = source.flatMap { CGImageSourceCreateThumbnailAtIndex($0, page, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: edge, kCGImageSourceShouldCacheImmediately: true, kCGImageSourceShouldAllowFloat: false] as CFDictionary) }
+            guard !token.cancelled else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self = self, !self.closed, self.generation == generation else { return }
                 self.task = nil
@@ -120,19 +137,19 @@ final class ImagePreview: NSObject {
                 }
                 self.count = count
                 let scale = max(width, height) / Double(max(image.width, image.height))
-                let size = NSSize(width: Double(image.width) * scale, height: Double(image.height) * scale)
+                let size = sourceSize ?? NSSize(width: Double(image.width) * scale, height: Double(image.height) * scale)
                 self.imageView.image = NSImage(cgImage: image, size: size)
                 self.imageView.frame = NSRect(origin: .zero, size: size)
                 self.needsInitialFit = true
                 self.view.layoutSubtreeIfNeeded()
                 self.fitWhenReady()
-                self.status.stringValue = "\(page + 1) / \(count) · \(Int(width)) × \(Int(height))"
+                self.status.stringValue = "\(page + 1) / \(count) · \(Int(width)) × \(Int(height))" + (original && max(width, height) > budgetEdge ? " · " + L("Scaled preview") : "")
                 self.controls(false)
             }
         }
-        task = work; DispatchQueue.global(qos: .userInitiated).async(execute: work)
+        task = work; Self.decodeQueue.async(execute: work)
     }
-    func pause() { task?.cancel(); task = nil; generation += 1; needsInitialFit = false; progress.stopAnimation(nil); imageView.image = nil }
+    func pause() { decodeToken?.cancel(); decodeToken = nil; task?.cancel(); task = nil; generation += 1; needsInitialFit = false; progress.stopAnimation(nil); imageView.image = nil }
     func resume() { if !closed && task == nil && imageView.image == nil && quickLook == nil { load() } }
     func close() { closed = true; pause(); quickLook?.previewItem = nil; quickLook?.close(); quickLook = nil }
 }

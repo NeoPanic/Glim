@@ -26,7 +26,6 @@ tiff = "=0.11.3"
 serde_json = "1"
 sha2 = "0.10"
 markdown = "=1.0.0"
-calamine = "0.31"
 csv = "1"
 sys-locale = "0.3"
 zip = { version = "2", default-features = false, features = ["deflate"] }

@@ -379,5 +379,20 @@
   "This file could not be rendered": "This file could not be rendered",
   "Other files remain available. Details were saved to the log.": "Other files remain available. Details were saved to the log.",
   "Retry rendering": "Retry rendering",
-  "Open logs": "Open logs"
+  "Open logs": "Open logs",
+  "Diagram page %page / %pages": "Diagram page %page / %pages",
+  "Use the diagram page controls to render this block; its complete source remains available.": "Use the diagram page controls to render this block; its complete source remains available.",
+  "Open full artwork": "Open full artwork",
+  "Actual size": "Actual size",
+  "Scaled preview": "Scaled preview",
+  "Complete source is available in Source view.": "Complete source is available in Source view.",
+  "Diagram source exceeds the active render budget; complete source is available in Source view.": "Diagram source exceeds the active render budget; complete source is available in Source view.",
+  "Book metadata": "Book metadata",
+  "Full text": "Full text",
+  "Cell": "Cell",
+  "Value": "Value",
+  "Formula": "Formula",
+  "Read-only worksheet cells · Saved formula results · Select a worksheet, page through cells, or double-click a value to read it in full.": "Read-only worksheet cells · Saved formula results · Select a worksheet, page through cells, or double-click a value to read it in full.",
+  "Cancel save": "Cancel save",
+  "Copy page": "Copy page"
 }

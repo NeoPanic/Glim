@@ -254,24 +254,72 @@ mod format_registry_tests {
     }
 }
 
-struct TextDialog(SourceReader);
+struct TextDialog {
+    source: Option<SourceReader>,
+    page: Option<Entity<super::paged::PagedReader>>,
+    task: Option<Task<()>>,
+    error: Option<String>,
+}
+impl TextDialog {
+    fn new(text: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        if text.len() <= glim_services::limits::TEXT_LINE_BYTES && !text.contains('\0') {
+            return Self {
+                source: Some(SourceReader::new(
+                    &text,
+                    "plain",
+                    true,
+                    Vec::new(),
+                    ScrollHandle::new(),
+                    window,
+                    cx,
+                )),
+                page: None,
+                task: None,
+                error: None,
+            };
+        }
+        let (cancel, guard) = glim_services::work::Cancellation::task();
+        let work = cx
+            .background_executor()
+            .spawn(async move { glim_services::paged::text_value(&text, &cancel) });
+        let task = cx.spawn(async move |view, cx| {
+            let _guard = guard;
+            let result = work.await;
+            let _ = view.update(cx, |view, cx| {
+                view.task = None;
+                match result {
+                    Ok(page) => {
+                        view.page = Some(cx.new(|_| super::paged::PagedReader::text_only(page)))
+                    }
+                    Err(error) => view.error = Some(format!("{error:#}")),
+                }
+                cx.notify();
+            });
+        });
+        Self {
+            source: None,
+            page: None,
+            task: Some(task),
+            error: None,
+        }
+    }
+}
 impl Render for TextDialog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.0.render(cx)
+        if let Some(source) = &mut self.source {
+            return source.render(cx);
+        }
+        if let Some(page) = &self.page {
+            return page.clone().into_any_element();
+        }
+        if let Some(error) = &self.error {
+            return div().p_3().child(error.clone()).into_any_element();
+        }
+        super::preview_loading(cx)
     }
 }
 pub(super) fn show_text_dialog(title: String, text: String, window: &mut Window, cx: &mut App) {
-    let content = cx.new(|cx| {
-        TextDialog(SourceReader::new(
-            &text,
-            "plain",
-            true,
-            Vec::new(),
-            ScrollHandle::new(),
-            window,
-            cx,
-        ))
-    });
+    let content = cx.new(|cx| TextDialog::new(text, window, cx));
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
             .title(title.clone())

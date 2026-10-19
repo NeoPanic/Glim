@@ -31,7 +31,7 @@ def generate(output):
                 raise ValueError(f'Invalid value/type for {key}')
             if entry['effect'] not in ('reject', 'truncate', 'fallback', 'budget', 'timeout', 'page', 'unlimited'):
                 raise ValueError(f'Invalid effect for {key}')
-            if not entry['unit'] or not entry['description']:
+            if not entry['unit'] or not entry['description'] or not entry.get('description_zh'):
                 raise ValueError(f'Missing policy documentation: {key}')
             values[key] = value
             if value is None:
@@ -77,7 +77,8 @@ def document():
                         if value >= scale and value % scale == 0:
                             display = f'{value // scale} {label}'; break
                 effect = effects[entry['effect']] if chinese else entry['effect']
-                lines.append(f"| `{group}.{name}` | {display} | {entry['unit']} | {effect} | {entry['description'].replace('|', '&#124;')} |")
+                behavior = entry['description_zh'] if chinese else entry['description']
+                lines.append(f"| `{group}.{name}` | {display} | {entry['unit']} | {effect} | {behavior.replace('|', '&#124;')} |")
             lines.append('')
         name = 'reader-limits.zh-CN.md' if chinese else 'reader-limits.md'
         (ROOT / 'docs' / name).write_text('\n'.join(lines))

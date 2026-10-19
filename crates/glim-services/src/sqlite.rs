@@ -123,7 +123,7 @@ pub fn prepare_cancellable(path: &Path, cancel: &crate::work::Cancellation) -> R
             if let Some(state) = state {
                 let mut input = fs::File::open(source)?.take(state.size + 1);
                 let mut output = fs::File::create(associated(&database, suffix))?;
-                let mut buffer = [0; 64 * 1024];
+                let mut buffer = vec![0; crate::limits::IO_BUFFER_BYTES];
                 let mut copied = 0;
                 loop {
                     cancel.check()?;

@@ -308,16 +308,34 @@ pub fn collect(text: &str) -> Result<Vec<Diagram>> {
 pub fn render(
     text: &str,
     cancelled: &AtomicBool,
-    mut publish: impl FnMut(Diagram, std::result::Result<DiagramImage, String>),
+    publish: impl FnMut(Diagram, std::result::Result<DiagramImage, String>),
 ) -> Result<()> {
+    render_page(text, 0, cancelled, publish).map(|_| ())
+}
+pub fn render_page(
+    text: &str,
+    page: usize,
+    cancelled: &AtomicBool,
+    mut publish: impl FnMut(Diagram, std::result::Result<DiagramImage, String>),
+) -> Result<usize> {
     let diagrams = collect(text)?;
+    let total = diagrams.len();
     let mut requests = Vec::new();
-    for diagram in diagrams {
-        if diagram.source.len() > MAX_SOURCE || requests.len() == MAX_DIAGRAMS {
+    for (index, diagram) in diagrams.into_iter().enumerate() {
+        if index / MAX_DIAGRAMS != page {
             publish(
                 diagram,
                 Err(crate::locale::tr(
-                    "Diagram source size or block count exceeds the preview budget",
+                    "Use the diagram page controls to render this block; its complete source remains available.",
+                )),
+            );
+            continue;
+        }
+        if diagram.source.len() > MAX_SOURCE {
+            publish(
+                diagram,
+                Err(crate::locale::tr(
+                    "Diagram source exceeds the active render budget; complete source is available in Source view.",
                 )),
             );
         } else {
@@ -325,7 +343,7 @@ pub fn render(
         }
     }
     if requests.is_empty() || cancelled.load(Ordering::Relaxed) {
-        return Ok(());
+        return Ok(total);
     }
     let dir = tempfile::tempdir()?;
     let input = dir.path().join("request.json");
@@ -368,6 +386,14 @@ pub fn render(
             Arc::new(fonts)
         })
         .clone();
+    let per_image = (reader_limits::DIAGRAM_AGGREGATE_ENCODED_BYTES as u64)
+        .min(reader_limits::DIAGRAM_AGGREGATE_DECODED_BYTES)
+        / requests.len().max(1) as u64;
+    let edge = ((per_image.saturating_sub(reader_limits::IO_BUFFER_BYTES as u64) / 4) as f64)
+        .sqrt()
+        .floor()
+        .max(1.) as u32;
+    let edge = edge.min(reader_limits::DIAGRAM_PREVIEW_EDGE);
     let mut bytes_used = 0;
     let mut pixels_used = 0_u64;
     let mut completed = HashSet::new();
@@ -384,7 +410,7 @@ pub fn render(
         if cancelled.load(Ordering::Relaxed) {
             let _ = child.kill();
             let _ = child.wait();
-            return Ok(());
+            return Ok(total);
         }
         if started.elapsed() > deadline {
             timed_out = true;
@@ -434,7 +460,7 @@ pub fn render(
                 let baseline = value
                     .and_then(|v| v.get("baseline"))
                     .and_then(|v| v.as_f64());
-                rasterize(svg, fonts.clone(), baseline)
+                rasterize(svg, fonts.clone(), baseline, edge)
                     .and_then(|image| {
                         bytes_used += image.png.len();
                         pixels_used += u64::from(image.width) * u64::from(image.height) * 4;
@@ -464,13 +490,14 @@ pub fn render(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    Ok(())
+    Ok(total)
 }
 
 fn rasterize(
     svg: &str,
     fonts: Arc<resvg::usvg::fontdb::Database>,
     baseline: Option<f64>,
+    edge: u32,
 ) -> Result<DiagramImage> {
     ensure!(
         svg.len() <= reader_limits::DIAGRAM_SVG_BYTES,
@@ -482,14 +509,10 @@ fn rasterize(
     };
     let tree = resvg::usvg::Tree::from_str(svg, &options)?;
     let size = tree.size();
-    let scale = (reader_limits::DIAGRAM_PREVIEW_EDGE as f32 / size.width().max(size.height()))
+    let scale = (edge as f32 / size.width().max(size.height()))
         .min(reader_limits::DIAGRAM_MAX_UPSCALE as f32);
-    let width = (size.width() * scale)
-        .ceil()
-        .clamp(1.0, reader_limits::DIAGRAM_PREVIEW_EDGE as f32) as u32;
-    let height = (size.height() * scale)
-        .ceil()
-        .clamp(1.0, reader_limits::DIAGRAM_PREVIEW_EDGE as f32) as u32;
+    let width = (size.width() * scale).ceil().clamp(1.0, edge as f32) as u32;
+    let height = (size.height() * scale).ceil().clamp(1.0, edge as f32) as u32;
     let mut pixmap =
         resvg::tiny_skia::Pixmap::new(width, height).context("Invalid diagram dimensions")?;
     resvg::render(
