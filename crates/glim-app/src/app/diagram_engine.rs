@@ -2,6 +2,8 @@
 //! system WebView exists only in this process; Markdown HTML never enters it.
 use glim_services::limits as reader_limits;
 
+include!(concat!(env!("OUT_DIR"), "/diagram_assets.rs"));
+
 pub fn run() -> anyhow::Result<()> {
     use anyhow::{Context, ensure};
     use std::{
@@ -74,48 +76,21 @@ pub fn run() -> anyhow::Result<()> {
         .with_devtools(false)
         .with_initialization_script(initialization)
         .with_custom_protocol("glim".into(), |_, incoming| {
-            let (mime, body): (&str, Cow<'static, [u8]>) = match incoming.uri().path() {
-                "/" | "/index.html" => (
-                    "text/html; charset=utf-8",
-                    Cow::Borrowed(include_bytes!("../../../../assets/markdown/index.html")),
-                ),
-                "/renderer.js" => (
-                    "text/javascript; charset=utf-8",
-                    Cow::Borrowed(include_bytes!("../../../../assets/markdown/renderer.js")),
-                ),
-                "/bootstrap.js" => (
-                    "text/javascript; charset=utf-8",
-                    Cow::Borrowed(include_bytes!("../../../../assets/markdown/bootstrap.js")),
-                ),
-                "/plantuml.js" => (
-                    "text/javascript; charset=utf-8",
-                    Cow::Borrowed(include_bytes!("../../../../assets/markdown/plantuml.js")),
-                ),
-                "/themes.js" => (
-                    "text/javascript; charset=utf-8",
-                    Cow::Borrowed(include_bytes!("../../../../assets/markdown/themes.js")),
-                ),
-                "/emoji.js" => (
-                    "text/javascript; charset=utf-8",
-                    Cow::Borrowed(include_bytes!("../../../../assets/markdown/emoji.js")),
-                ),
-                "/openiconic.js" => (
-                    "text/javascript; charset=utf-8",
-                    Cow::Borrowed(include_bytes!("../../../../assets/markdown/openiconic.js")),
-                ),
-                "/c4.min.js" => (
-                    "text/javascript; charset=utf-8",
-                    Cow::Borrowed(include_bytes!("../../../../assets/markdown/c4.min.js")),
-                ),
-                _ => {
-                    return Response::builder()
-                        .status(404)
-                        .body(Cow::Borrowed(&b""[..]))
-                        .unwrap();
-                }
+            let route = if incoming.uri().path() == "/" {
+                "/index.html"
+            } else {
+                incoming.uri().path()
             };
+            let Some((_, mime, bytes)) = DIAGRAM_ASSETS.iter().find(|(path, _, _)| *path == route)
+            else {
+                return Response::builder()
+                    .status(404)
+                    .body(Cow::Borrowed(&b""[..]))
+                    .unwrap();
+            };
+            let body: Cow<'static, [u8]> = Cow::Borrowed(bytes);
             Response::builder()
-                .header("Content-Type", mime)
+                .header("Content-Type", *mime)
                 .header("Access-Control-Allow-Origin", "*")
                 .body(body)
                 .unwrap()

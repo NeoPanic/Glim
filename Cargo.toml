@@ -4,7 +4,7 @@ default-members = ["crates/glim-app"]
 resolver = "3"
 
 [workspace.package]
-version = "0.2.4"
+version = "0.2.5"
 edition = "2024"
 publish = false
 license = "MIT"
@@ -44,6 +44,6 @@ lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
 
-# Keep GPUI pinned; local patch adds opt-in frame panic recovery.
+# Keep GPUI pinned; local patch adds opt-in frame panic recovery and visible-only list measurement.
 [patch.crates-io]
 gpui-pre = { path = "vendor/gpui-pre" }

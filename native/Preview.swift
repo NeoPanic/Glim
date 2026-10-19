@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 import CoreServices
 import CoreText
 
-struct Playlist: Decodable { let files: [String]; let shuffle: Bool; let autoplay: Bool?; let playbackFiles: [String: String]?; let matroskaFiles: [String]?; let mediaHelper: String?; let mediaDirectory: String?; let mediaErrors: [String: String]?; let office: Bool?; let image: Bool?; let imagePath: String?; let imageWidth: Double?; let imageHeight: Double?; let associations: String?; let font: Bool?; let sqlite: String?; let sqliteInfo: String?; let spreadsheet: String?; let htmlContent: String?; let htmlFile: Bool?; let language: String?; let localizations: [String: String]? }
+struct Playlist: Decodable { let files: [String]; let shuffle: Bool; let autoplay: Bool?; let playbackFiles: [String: String]?; let matroskaFiles: [String]?; let mediaHelper: String?; let mediaDirectory: String?; let mediaErrors: [String: String]?; let office: Bool?; let image: Bool?; let imagePath: String?; let imageWidth: Double?; let imageHeight: Double?; let associations: String?; let font: Bool?; let sqlite: String?; let sqliteInfo: String?; let spreadsheet: String?; let htmlContent: String?; let htmlFile: Bool?; let fileBytes: Bool?; let spreadsheetIndex: Bool?; let spreadsheetCache: String?; let spreadsheetHelper: String?; let language: String?; let localizations: [String: String]? }
 
 var nativeTranslations: [String: String] = [:]
 func L(_ text: String) -> String { nativeTranslations[text] ?? text }
@@ -209,15 +209,15 @@ final class FontPreview: NSObject, NSTextFieldDelegate {
     let sizes: [CGFloat] = [12, 18, 24, 36, 48, 72]
     var samples: [NSTextField] = []
     var availableFaces = 0
-    init(url: URL) {
+    init(url: URL, extraControls: [NSView] = []) {
         super.init()
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12; stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20), stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20), stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 16), stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16)])
         let title = NSTextField(labelWithString: url.lastPathComponent); title.font = .systemFont(ofSize: 17, weight: .semibold); stack.addArrangedSubview(title)
-        selector.target = self; selector.action = #selector(changeFace); selector.isEnabled = false; stack.addArrangedSubview(selector)
-        input.delegate = self; input.placeholderString = L("Type sample text…"); stack.addArrangedSubview(input)
-        input.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        selector.target = self; selector.action = #selector(changeFace); selector.isEnabled = false
+        input.delegate = self; input.placeholderString = L("Type sample text…")
+        input.widthAnchor.constraint(equalToConstant: 280).isActive = true
         metadata.textColor = .secondaryLabelColor; metadata.font = .systemFont(ofSize: 12); stack.addArrangedSubview(metadata)
         let rows = NSStackView(); rows.orientation = .vertical; rows.alignment = .leading; rows.spacing = 20; rows.edgeInsets = NSEdgeInsets(top: 16, left: 0, bottom: 16, right: 12)
         for size in sizes {
@@ -232,6 +232,10 @@ final class FontPreview: NSObject, NSTextFieldDelegate {
         rows.translatesAutoresizingMaskIntoConstraints = false; rows.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
         stack.addArrangedSubview(scroll); scroll.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         let note = NSTextField(wrappingLabelWithString: L("Preview only — this font is not installed. Missing characters may use a system fallback.")); note.font = .systemFont(ofSize: 11); note.textColor = .secondaryLabelColor; stack.addArrangedSubview(note)
+        let fontControls = NSStackView(); fontControls.addArrangedSubview(selector); fontControls.addArrangedSubview(input)
+        extraControls.forEach { fontControls.addArrangedSubview($0) }
+        scroll.contentInsets.bottom = 72
+        FloatingReaderToolbar(items: fontControls).install(in: view)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var fonts = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor] ?? []
             var failure = "This font could not be decoded. It may be damaged or unsupported."
@@ -408,6 +412,9 @@ final class MediaPreparation {
         if process.isRunning { process.terminate() }
     }
     func run(helper: URL, source: URL, destination: URL) throws {
+        try run(helper: helper, arguments: ["--prepare-matroska", source.path, destination.path], destination: destination)
+    }
+    func run(helper: URL, arguments: [String], destination: URL) throws {
         let log = destination.appendingPathExtension("log")
         FileManager.default.createFile(atPath: log.path, contents: nil)
         let stderr = try FileHandle(forWritingTo: log)
@@ -415,7 +422,7 @@ final class MediaPreparation {
         lock.lock()
         if cancelled { lock.unlock(); throw CocoaError(.userCancelled) }
         process.executableURL = helper
-        process.arguments = ["--prepare-matroska", source.path, destination.path]
+        process.arguments = arguments
         process.standardInput = FileHandle.nullDevice; process.standardOutput = FileHandle.nullDevice
         process.standardError = stderr
         do { try process.run(); lock.unlock() } catch { lock.unlock(); throw error }
@@ -431,6 +438,7 @@ final class MediaPreparation {
 }
 
 final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    var hasReaderActionBridge = false
     var closed = false
     let host = NativePreviewHost(frame: NSRect(x: 0, y: 0, width: 1000, height: 740))
     let player = AVPlayer()
@@ -463,9 +471,12 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
     var spreadsheetView: WKWebView?
     var fontPreview: FontPreview?
     var imagePreview: ImagePreview?
+    var pendingReaderAction: String?
+    private var supportsFileBytes = false
     var htmlPreview: HTMLPreview?
     var htmlAnchor: String?
     var sqlitePreview: SQLitePreview?
+    var workbookPreview: WorkbookPreview?
     var failed = Set<URL>()
 
     func button(_ title: String, _ action: Selector) -> NSButton {
@@ -494,8 +505,21 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             if let anchor = htmlAnchor { preview.reveal(anchor) }
             return
         }
+        supportsFileBytes = playlist.fileBytes == true
+        if playlist.spreadsheetIndex == true, let database = playlist.sqlite,
+           let cache = playlist.spreadsheetCache, let helper = playlist.spreadsheetHelper {
+            let preview = WorkbookPreview(database: database, cache: cache, helper: helper, information: playlist.sqliteInfo ?? "") { [weak self] in
+                guard let self = self else { return [] }
+                return self.readerActionButtons() + [self.externalOpenButton()]
+            }
+            workbookPreview = preview; preview.view.frame = host.bounds
+            preview.view.autoresizingMask = [.width, .height]; host.addSubview(preview.view)
+            return
+        }
         if let info = playlist.sqliteInfo {
-            let preview = SQLitePreview(path: playlist.sqlite, information: info); sqlitePreview = preview
+            var actions = readerActionButtons()
+            if playlist.spreadsheetIndex == true { actions.append(externalOpenButton()) }
+            let preview = SQLitePreview(path: playlist.sqlite, information: info, extraControls: actions); sqlitePreview = preview
             preview.view.frame = host.bounds
             preview.view.autoresizingMask = [.width, .height]
             host.addSubview(preview.view)
@@ -509,7 +533,7 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             host.addSubview(preview.view); return
         }
         if playlist.font == true {
-            let preview = FontPreview(url: urls[0]); fontPreview = preview
+            let preview = FontPreview(url: urls[0], extraControls: readerActionButtons()); fontPreview = preview
             preview.view.frame = host.bounds
             preview.view.autoresizingMask = [.width, .height]
             host.addSubview(preview.view)
@@ -546,8 +570,7 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         }
         toolbar.addArrangedSubview(titleLabel)
         toolbar.addArrangedSubview(detailLabel)
-        content.addArrangedSubview(toolbar)
-        toolbar.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+        readerActionButtons().forEach { toolbar.addArrangedSubview($0) }
         if pdf {
             guard let document = PDFDocument(url: urls[0]) else { throw NSError(domain: "Glim", code: 2, userInfo: [NSLocalizedDescriptionKey: "This PDF could not be opened."]) }
             if document.isLocked {
@@ -605,6 +628,12 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             NotificationCenter.default.addObserver(self, selector: #selector(playbackFailed(_:)), name: .AVPlayerItemFailedToPlayToEndTime, object: nil)
             play(0, autoplay: playlist.autoplay != false)
         }
+        // Leave AVKit's timeline clear when its own playback controls appear.
+        FloatingReaderToolbar(items: toolbar).install(in: host, bottomInset: pdf ? 16 : 80)
+    }
+    @objc private func requestFileBytes() { pendingReaderAction = "bytes" }
+    private func readerActionButtons() -> [NSView] {
+        (supportsFileBytes && hasReaderActionBridge) ? [button(L("File bytes"), #selector(requestFileBytes))] : []
     }
     func showOffice(_ url: URL, spreadsheet: String? = nil) {
         let toolbar = NSStackView()
@@ -614,13 +643,8 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         titleLabel.lineBreakMode = .byTruncatingMiddle
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         toolbar.addArrangedSubview(titleLabel)
-        toolbar.addArrangedSubview(button(L("Open in Default App"), #selector(openOfficeExternally)))
-        host.addSubview(toolbar)
-        NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: host.topAnchor, constant: 10),
-            toolbar.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 12),
-            toolbar.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -12)
-        ])
+        toolbar.addArrangedSubview(externalOpenButton())
+        readerActionButtons().forEach { toolbar.addArrangedSubview($0) }
         if let html = spreadsheet {
             let configuration = WKWebViewConfiguration()
             configuration.defaultWebpagePreferences.allowsContentJavaScript = false
@@ -629,17 +653,18 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             web.translatesAutoresizingMaskIntoConstraints = false
             host.addSubview(web)
             NSLayoutConstraint.activate([
-                web.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 10),
+                web.topAnchor.constraint(equalTo: host.topAnchor),
                 web.leadingAnchor.constraint(equalTo: host.leadingAnchor),
                 web.trailingAnchor.constraint(equalTo: host.trailingAnchor),
                 web.bottomAnchor.constraint(equalTo: host.bottomAnchor)
             ])
+            FloatingReaderToolbar(items: toolbar).install(in: host)
             web.loadHTMLString(html, baseURL: nil)
             return
         }
         // Use the undecorated embedded presentation rather than Quick Look's
         // full preview frame, which adds a page-edge rule beside Office slides.
-        // Auto Layout supplies the actual content bounds below the toolbar.
+        // Auto Layout supplies the full content bounds beneath floating controls.
         guard let preview = QLPreviewView(frame: .zero, style: .compact) else {
             let alert = NSAlert(); alert.messageText = L("Document preview is unavailable"); alert.informativeText = L("Open this document in its default app to view it."); alert.runModal(); return
         }
@@ -649,11 +674,12 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         preview.autostarts = true
         host.addSubview(preview)
         NSLayoutConstraint.activate([
-            preview.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 10),
+            preview.topAnchor.constraint(equalTo: host.topAnchor),
             preview.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             preview.trailingAnchor.constraint(equalTo: host.trailingAnchor),
             preview.bottomAnchor.constraint(equalTo: host.bottomAnchor)
         ])
+        FloatingReaderToolbar(items: toolbar).install(in: host)
         // Quick Look creates its remote content when previewItem is assigned.
         // Resolve the toolbar and preview bounds first, rather than loading
         // against the initial full-window frame and resizing it afterwards.
@@ -661,7 +687,65 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         preview.layoutSubtreeIfNeeded()
         preview.previewItem = url as NSURL
     }
-    @objc func openOfficeExternally() { if let url = urls.first { NSWorkspace.shared.open(url) } }
+    private func isGlim(_ application: URL) -> Bool {
+        Bundle(url: application)?.bundleIdentifier == "io.github.jony4.glimpse"
+    }
+    private func externalOpenButton() -> NSButton {
+        let application = urls.first.flatMap { NSWorkspace.shared.urlForApplication(toOpen: $0) }
+        let title = application.map { !isGlim($0) } == true ? L("Open in Default App") : L("Open with Another App…")
+        return button(title, #selector(openOfficeExternally(_:)))
+    }
+    private func openDocument(_ document: URL, with application: URL) {
+        guard !isGlim(application) else {
+            let alert = NSAlert(); alert.messageText = L("Choose an application other than Glim.")
+            alert.runModal(); return
+        }
+        NSWorkspace.shared.open([document], withApplicationAt: application, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+            guard let error = error else { return }
+            DispatchQueue.main.async {
+                let alert = NSAlert(); alert.messageText = L("Cannot open this file in the selected application.")
+                alert.informativeText = error.localizedDescription; alert.runModal()
+            }
+        }
+    }
+    @objc func openOfficeExternally(_ sender: NSButton) {
+        guard let document = urls.first else { return }
+        // Resolve again on click: file associations may have changed while open.
+        if let application = NSWorkspace.shared.urlForApplication(toOpen: document), !isGlim(application) {
+            openDocument(document, with: application); return
+        }
+        let applications = (LSCopyApplicationURLsForURL(document as CFURL, .all)?.takeRetainedValue() as? [URL]) ?? []
+        var seen = Set<String>()
+        let available = applications.filter { application in
+            guard !isGlim(application) else { return false }
+            let key = Bundle(url: application)?.bundleIdentifier ?? application.standardizedFileURL.path
+            return seen.insert(key).inserted
+        }.sorted { FileManager.default.displayName(atPath: $0.path).localizedStandardCompare(FileManager.default.displayName(atPath: $1.path)) == .orderedAscending }
+        let menu = NSMenu()
+        for application in available {
+            let item = NSMenuItem(title: FileManager.default.displayName(atPath: application.path), action: #selector(openInSelectedApplication(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = application
+            let icon = NSWorkspace.shared.icon(forFile: application.path); icon.size = NSSize(width: 16, height: 16); item.image = icon
+            menu.addItem(item)
+        }
+        if !available.isEmpty { menu.addItem(.separator()) }
+        let choose = NSMenuItem(title: L("Choose Application…"), action: #selector(chooseExternalApplication), keyEquivalent: "")
+        choose.target = self; menu.addItem(choose)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height), in: sender)
+    }
+    @objc private func openInSelectedApplication(_ sender: NSMenuItem) {
+        guard let application = sender.representedObject as? URL, let document = urls.first else { return }
+        openDocument(document, with: application)
+    }
+    @objc private func chooseExternalApplication() {
+        guard let document = urls.first else { return }
+        let panel = NSOpenPanel(); panel.title = L("Choose Application…")
+        panel.message = L("Choose an application for this file. Its default application will not change.")
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let application = panel.url { openDocument(document, with: application) }
+    }
 
     private func prepareVideo(_ next: Int, autoplay: Bool) {
         guard let helper = mediaHelper, let directory = mediaDirectory else { return }
@@ -811,6 +895,7 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         imagePreview?.close()
         htmlPreview?.close()
         sqlitePreview?.close()
+        workbookPreview?.close()
         officeView?.previewItem = nil
         officeView?.close()
         spreadsheetView?.stopLoading()

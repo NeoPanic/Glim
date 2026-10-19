@@ -5,10 +5,14 @@ use gpui_kit::{
         ActiveTheme, Sizable,
         button::{Button, ButtonVariants},
         h_flex,
-        menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
     },
     *,
 };
+
+enum TabMenuAction {
+    Close(Vec<super::header::Target>),
+    Trash(std::path::PathBuf),
+}
 
 impl Workspace {
     pub(super) fn active_reader(&self) -> Option<&Reader> {
@@ -116,19 +120,21 @@ impl Workspace {
         }
         cx.notify();
     }
-    fn tab_context_menu(
-        &self,
-        mut menu: PopupMenu,
+    fn show_tab_menu(
+        &mut self,
         target: &super::header::Target,
+        window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> PopupMenu {
+    ) {
         let Some(index) = self
             .tabs
             .iter()
-            .position(|r| super::header::Target::from_reader(r) == *target)
+            .position(|reader| super::header::Target::from_reader(reader) == *target)
         else {
-            return menu;
+            return;
         };
+        let mut items = Vec::new();
+        let mut actions = Vec::new();
         for (label, mode) in [
             ("Close", 0),
             ("Close Tabs to the Right", 1),
@@ -145,31 +151,36 @@ impl Workspace {
                     2 => *i != index,
                     _ => true,
                 })
-                .map(|(_, r)| super::header::Target::from_reader(r))
+                .map(|(_, reader)| super::header::Target::from_reader(reader))
                 .collect();
-            let view = cx.entity().downgrade();
-            menu = menu.item(
-                PopupMenuItem::new(glim_services::locale::tr(label))
-                    .disabled(targets.is_empty())
-                    .on_click(move |_, w, cx| {
-                        let _ = view.update(cx, |v, cx| v.close_tabs(targets.clone(), w, cx));
-                    }),
-            );
+            items.push((Some(glim_services::locale::tr(label)), !targets.is_empty()));
+            actions.push(Some(TabMenuAction::Close(targets)));
         }
         let reader = &self.tabs[index];
         if !reader.historical && reader.diff.is_none() {
-            let path = reader.path.clone();
-            let view = cx.entity().downgrade();
-            menu = menu.separator().item(
-                PopupMenuItem::new(glim_services::locale::tr("Move to Trash…")).on_click(
-                    move |_, window, cx| {
-                        let _ = view
-                            .update(cx, |view, cx| view.confirm_trash(path.clone(), window, cx));
-                    },
-                ),
-            );
+            items.push((None, true));
+            actions.push(None);
+            items.push((Some(glim_services::locale::tr("Move to Trash…")), true));
+            actions.push(Some(TabMenuAction::Trash(reader.path.clone())));
         }
-        menu
+        self.context_menu_task = None;
+        let Some(menu) = crate::views::native_menu_bridge::NativeMenu::new(&items, window) else {
+            return;
+        };
+        self.context_menu_task = Some(cx.spawn_in(window, async move |view, cx| {
+            let selected = menu.choose(cx).await;
+            let _ = view.update_in(cx, |view, window, cx| {
+                if let Some(action) = selected
+                    .and_then(|index| actions.get_mut(index))
+                    .and_then(Option::take)
+                {
+                    match action {
+                        TabMenuAction::Close(targets) => view.close_tabs(targets, window, cx),
+                        TabMenuAction::Trash(path) => view.confirm_trash(path, window, cx),
+                    }
+                }
+            });
+        }));
     }
 
     pub(super) fn close_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -214,7 +225,6 @@ impl Workspace {
             .map(|(index, reader)| {
                 let active = self.active == Some(index);
                 let target = super::header::Target::from_reader(reader);
-                let menu_view = cx.entity().downgrade();
                 let mut label = reader
                     .commit_file
                     .as_ref()
@@ -275,11 +285,13 @@ impl Workspace {
                                 view.close_tab(index, window, cx);
                             })),
                     )
-                    .context_menu(move |menu, _, cx| {
-                        menu_view
-                            .update(cx, |v, cx| v.tab_context_menu(menu, &target, cx))
-                            .expect("Tab menu owner is alive")
-                    })
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |view, _, window, cx| {
+                            cx.stop_propagation();
+                            view.show_tab_menu(&target, window, cx);
+                        }),
+                    )
             })
             .collect::<Vec<_>>();
         h_flex()

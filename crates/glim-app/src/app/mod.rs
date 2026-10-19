@@ -7,6 +7,7 @@ pub(crate) mod languages;
 pub(crate) mod media_prepare;
 mod menus;
 mod shortcuts;
+pub(crate) mod spreadsheet_prepare;
 #[cfg(feature = "macos-updater")]
 mod updater_bridge;
 pub(crate) mod updates;

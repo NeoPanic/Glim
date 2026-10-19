@@ -19,7 +19,7 @@ png = "=0.17.16"
 matroska-demuxer = "=0.8.1"
 mp4 = "=0.14.0"
 url = "2"
-resvg = { version = "0.45.1", default-features = false, features = ["text", "system-fonts"] }
+resvg = { version = "0.45.1", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 
 tempfile = "3"
 tiff = "=0.11.3"

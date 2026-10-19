@@ -1,0 +1,1 @@
+import{a as e}from"./chunk-REJXRCAO.js";import"./chunk-KGWEWERB.js";var t="zenuml",a=e(r=>/^\s*zenuml/.test(r),"detector"),o=e(async()=>{let{diagram:r}=await import("./zenuml-definition-ZCSB3OVJ-AJ4B2VX2.js");return{id:t,diagram:r}},"loader"),d={id:t,detector:a,loader:o},l=d;export{l as default};

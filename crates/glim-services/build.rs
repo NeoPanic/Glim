@@ -43,8 +43,10 @@ fn main() {
     .expect("embed locale catalogs");
     println!("cargo:rerun-if-changed=../../native/Preview.swift");
     println!("cargo:rerun-if-changed=../../native/ImagePreview.swift");
+    println!("cargo:rerun-if-changed=../../native/FloatingReaderToolbar.swift");
     println!("cargo:rerun-if-changed=../../native/HTMLPreview.swift");
     println!("cargo:rerun-if-changed=../../native/SQLitePreview.swift");
+    println!("cargo:rerun-if-changed=../../native/WorkbookPreview.swift");
     println!("cargo:rerun-if-changed=../../native/PreviewMain.swift");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;
@@ -58,17 +60,31 @@ fn main() {
     let main = output.with_file_name("main.swift");
     std::fs::copy("../../native/PreviewMain.swift", &main)
         .expect("Cannot prepare native preview entry point");
-    let status = Command::new("xcrun")
+    let mut compiler = Command::new("xcrun");
+    let sdk = Command::new("xcrun")
+        .arg("--show-sdk-path")
+        .output()
+        .expect("macOS SDK path");
+    let sdk = PathBuf::from(String::from_utf8_lossy(&sdk.stdout).trim());
+    compiler.arg("swiftc");
+    if sdk
+        .join("System/Library/Frameworks/AppKit.framework/Headers/NSGlassEffectView.h")
+        .is_file()
+    {
+        compiler.arg("-DGLIM_NATIVE_GLASS");
+    }
+    let status = compiler
         .args([
-            "swiftc",
             "-O",
             "-swift-version",
             "5",
             "-target",
             &format!("{arch}-apple-macos11.0"),
             "../../native/SQLitePreview.swift",
+            "../../native/WorkbookPreview.swift",
             "../../native/Preview.swift",
             "../../native/ImagePreview.swift",
+            "../../native/FloatingReaderToolbar.swift",
             "../../native/HTMLPreview.swift",
         ])
         .arg(output.with_file_name("ReaderLimits.swift"))

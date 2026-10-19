@@ -166,71 +166,10 @@ impl Render for XMindReader {
                     && (p.y + 96.) * zoom + f32::from(offset.y) > -100.)
         };
         v_flex()
+            .relative()
             .size_full()
             .min_h_0()
             .gap_0()
-            .child(
-                h_flex()
-                    .gap_2()
-                    .flex_wrap()
-                    .items_center()
-                    .p_3()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr("Mind map · Read only")),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        Button::new("xmind-collapse-all")
-                            .ghost()
-                            .label(tr("Collapse all"))
-                            .on_click(cx.listener(|v, _, _, cx| {
-                                v.collapsed =
-                                    (0..v.document.sheets[v.sheet].topics.len()).collect();
-                                v.rebuild();
-                                v.center_root();
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("xmind-expand-all")
-                            .ghost()
-                            .label(tr("Expand all"))
-                            .on_click(cx.listener(|v, _, _, cx| {
-                                v.collapsed.clear();
-                                v.rebuild();
-                                v.center_root();
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("xmind-zoom-out")
-                            .label("−")
-                            .disabled(zoom <= 0.5)
-                            .on_click(cx.listener(|v, _, _, cx| v.change_zoom(-0.1, cx))),
-                    )
-                    .child(div().text_sm().child(format!("{:.0}%", zoom * 100.)))
-                    .child(
-                        Button::new("xmind-zoom-in")
-                            .label("+")
-                            .disabled(zoom >= 1.5)
-                            .on_click(cx.listener(|v, _, _, cx| v.change_zoom(0.1, cx))),
-                    )
-                    .child(
-                        Button::new("xmind-reset")
-                            .ghost()
-                            .label(tr("Reset view"))
-                            .on_click(cx.listener(|v, _, _, cx| {
-                                v.zoom = 1.;
-                                v.center_root();
-                                cx.notify();
-                            })),
-                    ),
-            )
             .child(
                 h_flex()
                     .id("xmind-sheets")
@@ -486,5 +425,60 @@ impl Render for XMindReader {
                             })),
                     ),
             )
+            .child(super::controls::floating(
+                "xmind-controls",
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .p_0()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr("Mind map · Read only")),
+                    )
+                    .child(
+                        Button::new("xmind-collapse-all")
+                            .label(tr("Collapse all"))
+                            .on_click(cx.listener(|v, _, _, cx| {
+                                v.collapsed =
+                                    (0..v.document.sheets[v.sheet].topics.len()).collect();
+                                v.rebuild();
+                                v.center_root();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("xmind-expand-all")
+                            .label(tr("Expand all"))
+                            .on_click(cx.listener(|v, _, _, cx| {
+                                v.collapsed.clear();
+                                v.rebuild();
+                                v.center_root();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("xmind-zoom-out")
+                            .label("−")
+                            .disabled(zoom <= 0.5)
+                            .on_click(cx.listener(|v, _, _, cx| v.change_zoom(-0.1, cx))),
+                    )
+                    .child(div().text_sm().child(format!("{:.0}%", zoom * 100.)))
+                    .child(
+                        Button::new("xmind-zoom-in")
+                            .label("+")
+                            .disabled(zoom >= 1.5)
+                            .on_click(cx.listener(|v, _, _, cx| v.change_zoom(0.1, cx))),
+                    )
+                    .child(Button::new("xmind-reset").label(tr("Reset view")).on_click(
+                        cx.listener(|v, _, _, cx| {
+                            v.zoom = 1.;
+                            v.center_root();
+                            cx.notify();
+                        }),
+                    )),
+                cx,
+            ))
     }
 }

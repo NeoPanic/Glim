@@ -10,7 +10,7 @@ use gpui_kit::{
     component::{
         ActiveTheme, FocusableExt, Icon,
         button::{Button, ButtonCustomVariant, ButtonVariants},
-        menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
+        menu::{PopupMenu, PopupMenuItem},
         tooltip::Tooltip,
     },
     prelude::FluentBuilder,
@@ -49,6 +49,17 @@ impl Row {
     }
 }
 
+#[derive(Clone, Copy)]
+enum FileMenuAction {
+    Play(bool),
+    Open,
+    Reveal,
+    CopyRelative,
+    CopyAbsolute,
+    Trash,
+    RemoveFolder(u64),
+}
+
 /// Only expanded directories are loaded, and only visible rows are rendered.
 pub struct Explorer {
     roots: Vec<PathBuf>,
@@ -68,6 +79,7 @@ pub struct Explorer {
     preserve_next_reveal: Option<PathBuf>,
     focus: FocusHandle,
     scroll: UniformListScrollHandle,
+    context_menu_task: Option<Task<()>>,
 }
 
 impl EventEmitter<ExplorerEvent> for Explorer {}
@@ -102,6 +114,7 @@ impl Explorer {
             preserve_next_reveal: None,
             focus: cx.focus_handle(),
             scroll: UniformListScrollHandle::new(),
+            context_menu_task: None,
         };
         view.rebuild();
         view
@@ -541,7 +554,6 @@ impl Explorer {
         let menu_path = row.entry.path.clone();
         let menu_is_dir = row.entry.is_dir;
         let menu_root_id = (row.depth == 0).then_some(self.root_ids[root_index]);
-        let menu_view = cx.entity().downgrade();
         let hover_path = menu_path.clone();
 
         let menu_root = self.roots[root_index].clone();
@@ -739,71 +751,119 @@ impl Explorer {
                         view.activate_path(&row_path, sticky, window, cx);
                     })),
             )
-            .context_menu(move |mut menu, _, cx| {
-                let has_media = menu_view.upgrade().is_some_and(|view| {
-                    view.read(cx).media_presence.get(&menu_path).copied() == Some(true)
-                });
-                if menu_is_dir && has_media {
-                    for (label, shuffle) in [("Play in Order", false), ("Shuffle Play", true)] {
-                        let path = menu_path.clone();
-                        let view = menu_view.clone();
-                        menu = menu.item(
-                            PopupMenuItem::new(glim_services::locale::tr(label)).on_click(
-                                move |_, _, cx| {
-                                    let _ = view.update(cx, |_, cx| {
-                                        cx.emit(ExplorerEvent::PlayFolder(path.clone(), shuffle))
-                                    });
-                                },
-                            ),
-                        );
-                    }
-                    menu = menu.separator();
-                } else if !menu_is_dir && glim_services::preview::supports(&menu_path) {
-                    let path = menu_path.clone();
-                    let view = menu_view.clone();
-                    menu = menu
-                        .item(
-                            PopupMenuItem::new(glim_services::locale::tr("Open Preview / Play"))
-                                .on_click(move |_, _, cx| {
-                                    let _ = view.update(cx, |_, cx| {
-                                        cx.emit(ExplorerEvent::OpenFile(path.clone()))
-                                    });
-                                }),
-                        )
-                        .separator();
-                }
-                let mut menu = path_menu(menu, &menu_path, &menu_root);
-                let trash_path = menu_path.clone();
-                let trash_view = menu_view.clone();
-                menu = menu.separator().item(
-                    PopupMenuItem::new(glim_services::locale::tr("Move to Trash…")).on_click(
-                        move |_, _, cx| {
-                            let _ = trash_view.update(cx, |_, cx| {
-                                cx.emit(ExplorerEvent::TrashEntry(trash_path.clone()));
-                            });
-                        },
-                    ),
-                );
-                if let Some(root_id) = menu_root_id {
-                    let view = menu_view.clone();
-                    menu = menu.separator().item(
-                        PopupMenuItem::new(glim_services::locale::tr(
-                            "Remove Folder from Workspace",
-                        ))
-                        .on_click(move |_, _, cx| {
-                            let _ = view.update(cx, |_, cx| {
-                                cx.emit(ExplorerEvent::RemoveFolder(root_id));
-                            });
-                        }),
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |view, _, window, cx| {
+                    cx.stop_propagation();
+                    view.show_file_menu(
+                        menu_path.clone(),
+                        menu_root.clone(),
+                        menu_root_id,
+                        menu_is_dir,
+                        window,
+                        cx,
                     );
-                }
-                menu
-            });
+                }),
+            );
+
         div()
             .w_full()
             .child(entry)
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .into_any_element()
+    }
+
+    fn show_file_menu(
+        &mut self,
+        path: PathBuf,
+        root: PathBuf,
+        root_id: Option<u64>,
+        is_dir: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use FileMenuAction::*;
+        let mut items = Vec::new();
+        if is_dir && self.media_presence.get(&path).copied() == Some(true) {
+            items.extend([
+                (Some("Play in Order"), Some(Play(false))),
+                (Some("Shuffle Play"), Some(Play(true))),
+                (None, None),
+            ]);
+        } else if !is_dir && glim_services::preview::supports(&path) {
+            items.extend([(Some("Open Preview / Play"), Some(Open)), (None, None)]);
+        }
+        items.extend([
+            (Some("Reveal in Finder"), Some(Reveal)),
+            (None, None),
+            (Some("Copy Relative Path"), Some(CopyRelative)),
+            (Some("Copy Absolute Path"), Some(CopyAbsolute)),
+            (None, None),
+            (Some("Move to Trash…"), Some(Trash)),
+        ]);
+        if let Some(id) = root_id {
+            items.extend([
+                (None, None),
+                (Some("Remove Folder from Workspace"), Some(RemoveFolder(id))),
+            ]);
+        }
+        let titles = items
+            .iter()
+            .map(|(label, _)| (label.map(glim_services::locale::tr), true))
+            .collect::<Vec<_>>();
+        self.context_menu_task = None;
+        let Some(menu) = super::native_menu_bridge::NativeMenu::new(&titles, window) else {
+            return;
+        };
+        self.context_menu_task = Some(cx.spawn_in(window, async move |view, cx| {
+            let selected = menu.choose(cx).await;
+            let _ = view.update_in(cx, |_, _, cx| {
+                if let Some(action) = selected
+                    .and_then(|index| items.get(index))
+                    .and_then(|(_, action)| *action)
+                {
+                    match action {
+                        Play(shuffle) => cx.emit(ExplorerEvent::PlayFolder(path.clone(), shuffle)),
+                        Open => cx.emit(ExplorerEvent::OpenFile(path.clone())),
+                        Reveal => cx.reveal_path(&path),
+                        CopyRelative => {
+                            let relative = path.strip_prefix(&root).unwrap_or(&path);
+                            let text = if relative.as_os_str().is_empty() {
+                                ".".to_owned()
+                            } else {
+                                relative.to_string_lossy().into_owned()
+                            };
+                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        }
+                        CopyAbsolute => cx.write_to_clipboard(ClipboardItem::new_string(
+                            path.to_string_lossy().into_owned(),
+                        )),
+                        Trash => cx.emit(ExplorerEvent::TrashEntry(path.clone())),
+                        RemoveFolder(id) => cx.emit(ExplorerEvent::RemoveFolder(id)),
+                    }
+                }
+            });
+        }));
+    }
+
+    fn show_add_folder_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.context_menu_task = None;
+        let items = [(
+            Some(glim_services::locale::tr("Add Folder to Workspace…")),
+            true,
+        )];
+        let Some(menu) = super::native_menu_bridge::NativeMenu::new(&items, window) else {
+            return;
+        };
+        self.context_menu_task = Some(cx.spawn_in(window, async move |view, cx| {
+            if menu.choose(cx).await == Some(0) {
+                let _ = view.update_in(cx, |_, window, cx| {
+                    window.defer(cx, |window, cx| {
+                        window.dispatch_action(Box::new(crate::app::actions::AddFolder), cx)
+                    });
+                });
+            }
+        }));
     }
 
     fn move_selection(&mut self, down: bool, cx: &mut Context<Self>) {
@@ -910,26 +970,19 @@ impl Render for Explorer {
                             .unwrap_or_default();
                         // A separate hit area below the final row: never an ancestor
                         // of file/folder menus, so both menus cannot open together.
+                        let blank_view = view.clone();
                         let mut blank = if blank_top < f32::from(bounds.size.height) {
-                            let mut element =
-                                div()
-                                    .id("files-blank-space")
-                                    .w(bounds.size.width)
-                                    .h(bounds.size.height - px(blank_top))
-                                    .context_menu(|menu, _, _| {
-                                        menu.item(
-                                            PopupMenuItem::new(glim_services::locale::tr(
-                                                "Add Folder to Workspace…",
-                                            ))
-                                            .on_click(|_, window, cx| {
-                                                window.dispatch_action(
-                                                    Box::new(crate::app::actions::AddFolder),
-                                                    cx,
-                                                );
-                                            }),
-                                        )
-                                    })
-                                    .into_any_element();
+                            let mut element = div()
+                                .id("files-blank-space")
+                                .w(bounds.size.width)
+                                .h(bounds.size.height - px(blank_top))
+                                .on_mouse_down(MouseButton::Right, move |_, window, cx| {
+                                    cx.stop_propagation();
+                                    let _ = blank_view.update(cx, |view, cx| {
+                                        view.show_add_folder_menu(window, cx)
+                                    });
+                                })
+                                .into_any_element();
                             element.prepaint_as_root(
                                 bounds.origin + point(px(0.), px(blank_top)),
                                 size(bounds.size.width, bounds.size.height - px(blank_top)).into(),

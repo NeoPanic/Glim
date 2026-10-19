@@ -23,13 +23,17 @@ final class SQLitePreview: NSObject, NSTableViewDataSource, NSTableViewDelegate 
     private let nextColumns = NSButton(title: L("Next columns"), target: nil, action: nil)
     private let retry = NSButton(title: L("Retry with more time"), target: nil, action: nil)
     private var catalogMore = false
+    private var catalogOffset = 0
     private var columnOffset = 0
     private var columnCount = 0
     private var rowOrder = ""
     private var querySeconds = Double(ReaderLimits.SQLITE_QUERY_SECONDS)
+    private let worksheetCells: Bool
+    private let initialWorksheet: (Int64,String)?
     private let pageSize = ReaderLimits.SQLITE_PAGE_ROWS
 
-    init(path: String?, information: String) {
+    init(path: String?, information: String, extraControls: [NSView] = [], worksheetCells: Bool = false, initialWorksheet: (Int64,String)? = nil) {
+        self.worksheetCells = worksheetCells; self.initialWorksheet = initialWorksheet
         super.init()
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10; stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
@@ -46,11 +50,16 @@ final class SQLitePreview: NSObject, NSTableViewDataSource, NSTableViewDelegate 
         nextColumns.target = self; nextColumns.action = #selector(nextColumnPage)
         retry.target = self; retry.action = #selector(retryPage)
         grid.target = self; grid.doubleAction = #selector(showFullValue)
-        [picker, structure, schemaButton, previous, next, previousColumns, nextColumns, moreTables, retry].forEach { toolbar.addArrangedSubview($0) }; stack.addArrangedSubview(toolbar)
+        let actions: [NSView] = worksheetCells ? [picker, previous, next, moreTables, retry] : [picker, structure, schemaButton, previous, next, previousColumns, nextColumns, moreTables, retry]
+        actions.forEach { toolbar.addArrangedSubview($0) }
+        if worksheetCells { moreTables.title = L("Show more worksheets") }
         grid.delegate = self; grid.dataSource = self; grid.usesAlternatingRowBackgroundColors = true; grid.rowHeight = 26; grid.columnAutoresizingStyle = .noColumnAutoresizing
         let scroll = NSScrollView(); scroll.documentView = grid; scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
         stack.addArrangedSubview(scroll); scroll.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         status.font = .systemFont(ofSize: 12); status.textColor = .secondaryLabelColor; stack.addArrangedSubview(status)
+        extraControls.forEach { toolbar.addArrangedSubview($0) }
+        scroll.contentInsets.bottom = 72
+        FloatingReaderToolbar(items: toolbar).install(in: view)
         controls()
         guard let path = path else { status.stringValue = L("Open the matching database to browse tables."); return }
         queue.async { [self] in
@@ -71,18 +80,27 @@ final class SQLitePreview: NSObject, NSTableViewDataSource, NSTableViewDelegate 
             let values = result.rows.prefix(ReaderLimits.SQLITE_TABLES).map { (name: $0[0], sql: $0[1]) }
             DispatchQueue.main.async { [weak self] in
                 guard let self = self, !self.closed else { return }
-                self.tables.append(contentsOf: values)
-                self.picker.addItems(withTitles: values.map { $0.name })
+                for value in values where !self.tables.contains(where: { $0.name == value.name }) {
+                    self.tables.append(value); self.picker.addItem(withTitle: value.name)
+                }
+                self.catalogOffset = offset + values.count
                 self.catalogMore = result.rows.count > ReaderLimits.SQLITE_TABLES
-                self.status.stringValue = L("%d tables / views").replacingOccurrences(of: "%d", with: String(self.tables.count))
+                self.status.stringValue = L(self.worksheetCells ? "%d worksheets" : "%d tables / views").replacingOccurrences(of: "%d", with: String(self.tables.count))
                 self.busy = false; self.controls()
-                if offset == 0 && !values.isEmpty { self.loadPage() }
+                if offset == 0 && !values.isEmpty {
+                    if let initial = self.initialWorksheet {
+                        let title = "\(initial.0): \(initial.1)"
+                        if let index = self.tables.firstIndex(where: { $0.name == title }) { self.picker.selectItem(at: index) }
+                        else { self.tables.append((name: title, sql: "table")); self.picker.addItem(withTitle: title); self.picker.selectItem(at: self.tables.count - 1) }
+                    }
+                    self.loadPage()
+                }
             }
         } catch { fail(error.localizedDescription) }
     }
     @objc private func loadMoreTables() {
         guard !busy, catalogMore else { return }
-        let offset = tables.count
+        let offset = catalogOffset
         busy = true; controls()
         queue.async { [self] in loadCatalog(offset: offset) }
     }
@@ -140,6 +158,13 @@ final class SQLitePreview: NSObject, NSTableViewDataSource, NSTableViewDelegate 
             return (columns, result, totalColumns)
         }
     }
+    func currentWorksheet() -> (Int64,String)? {
+        let index = picker.indexOfSelectedItem
+        guard index >= 0, index < tables.count else { return nil }
+        let parts = tables[index].name.split(separator: ":", maxSplits: 1)
+        guard parts.count == 2, let id = Int64(parts[0]) else { return nil }
+        return (id, String(parts[1]).trimmingCharacters(in: .whitespaces))
+    }
     private func controls() {
         picker.isEnabled = !busy && !tables.isEmpty
         structure.isEnabled = !busy && !tables.isEmpty
@@ -149,6 +174,12 @@ final class SQLitePreview: NSObject, NSTableViewDataSource, NSTableViewDelegate 
         moreTables.isEnabled = !busy && catalogMore
         previousColumns.isEnabled = !busy && columnOffset > 0
         nextColumns.isEnabled = !busy && columnOffset + ReaderLimits.SQLITE_COLUMNS < columnCount
+        if !busy {
+            previous.isHidden = offset == 0 && !more; next.isHidden = previous.isHidden
+            previousColumns.isHidden = columnOffset == 0 && columnCount <= ReaderLimits.SQLITE_COLUMNS
+            nextColumns.isHidden = previousColumns.isHidden
+            moreTables.isHidden = !catalogMore
+        }
         retry.isEnabled = !busy && !tables.isEmpty
     }
     private func fail(_ message: String) {

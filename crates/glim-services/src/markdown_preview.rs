@@ -4,10 +4,10 @@ use crate::limits as reader_limits;
 use anyhow::{Context, Result, ensure};
 use markdown::{ParseOptions, mdast::Node};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     process::{Command, Stdio},
     sync::{
-        Arc, OnceLock,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -17,7 +17,24 @@ use std::{
 /// AST block ranges keep code, HTML, math and frontmatter examples untouched.
 pub fn normalize_tables(text: &str) -> std::borrow::Cow<'_, str> {
     use std::{borrow::Cow, ops::Range};
-    if !text.contains('|') {
+    // The repair only removes blank lines between explicit pipe rows. Ordinary
+    // tables need no AST pass; false-positive candidates still use the parser
+    // below so fenced code, HTML and frontmatter remain protected.
+    let mut previous_pipe = false;
+    let mut gap = false;
+    let candidate = text.lines().any(|line| {
+        let line = line.trim();
+        if line.is_empty() {
+            gap = true;
+            return false;
+        }
+        let pipe = line.starts_with('|') && line.ends_with('|');
+        let candidate = previous_pipe && gap && pipe;
+        previous_pipe = pipe;
+        gap = false;
+        candidate
+    });
+    if !candidate {
         return Cow::Borrowed(text);
     }
     let mut options = ParseOptions::gfm();
@@ -251,12 +268,54 @@ pub fn from_node(node: &Node) -> Option<Diagram> {
     }
 }
 
+#[derive(Clone)]
 pub struct DiagramImage {
     pub png: Vec<u8>,
     pub width: u32,
     pub height: u32,
     pub baseline: f32,
 }
+// Compressed results are reusable within this process. Source, engine kind and
+// raster edge form the key; eviction bounds cache memory independently of files.
+type CachedDiagram = (Diagram, u32, Arc<DiagramImage>);
+static IMAGE_CACHE: Mutex<VecDeque<CachedDiagram>> = Mutex::new(VecDeque::new());
+fn cached_image(diagram: &Diagram, edge: u32) -> Option<Arc<DiagramImage>> {
+    let mut cache = IMAGE_CACHE.lock().ok()?;
+    let index = cache
+        .iter()
+        .position(|(key, size, _)| key == diagram && *size == edge)?;
+    let entry = cache.remove(index)?;
+    let image = entry.2.clone();
+    cache.push_back(entry);
+    Some(image)
+}
+fn remember_image(diagram: &Diagram, edge: u32, image: &DiagramImage) {
+    let cost = |diagram: &Diagram, image: &DiagramImage| {
+        diagram
+            .source
+            .len()
+            .saturating_add(diagram.kind.len())
+            .saturating_add(image.png.len())
+            .saturating_add(std::mem::size_of::<CachedDiagram>())
+    };
+    let bytes = cost(diagram, image);
+    if bytes as u64 > reader_limits::IO_CACHE_BYTES {
+        return;
+    }
+    let Ok(mut cache) = IMAGE_CACHE.lock() else {
+        return;
+    };
+    cache.retain(|(key, size, _)| key != diagram || *size != edge);
+    let mut used: usize = cache.iter().map(|(key, _, image)| cost(key, image)).sum();
+    while used.saturating_add(bytes) as u64 > reader_limits::IO_CACHE_BYTES {
+        let Some((key, _, image)) = cache.pop_front() else {
+            break;
+        };
+        used = used.saturating_sub(cost(&key, &image));
+    }
+    cache.push_back((diagram.clone(), edge, Arc::new(image.clone())));
+}
+
 /// Common LaTeX display delimiters are escaped punctuation to the GFM parser.
 /// Recognize them using the original paragraph source, preserving source offsets.
 pub fn from_node_with_source(node: &Node, source: Option<&str>) -> Option<Diagram> {
@@ -279,6 +338,17 @@ pub type RenderedDiagrams = HashMap<Diagram, std::result::Result<DiagramImage, S
 
 /// Deduplicate repeated blocks and keep source ranges entirely in TextView.
 pub fn collect(text: &str) -> Result<Vec<Diagram>> {
+    // Any supported diagram must use a fence, math delimiter, or indented code.
+    // This is only a conservative negative filter, never a diagram parser.
+    if !text.contains("```")
+        && !text.contains("~~~")
+        && !text.contains('$')
+        && !text.contains("\\[")
+        && !text.contains("    ")
+        && !text.contains('\t')
+    {
+        return Ok(Vec::new());
+    }
     let mut options = ParseOptions::gfm();
     options.constructs.math_flow = true;
     options.constructs.math_text = true;
@@ -345,6 +415,37 @@ pub fn render_page(
     if requests.is_empty() || cancelled.load(Ordering::Relaxed) {
         return Ok(total);
     }
+    let per_image = (reader_limits::DIAGRAM_AGGREGATE_ENCODED_BYTES as u64)
+        .min(reader_limits::DIAGRAM_AGGREGATE_DECODED_BYTES)
+        / requests.len().max(1) as u64;
+    let edge = ((per_image.saturating_sub(reader_limits::IO_BUFFER_BYTES as u64) / 4) as f64)
+        .sqrt()
+        .floor()
+        .max(1.) as u32;
+    let edge = edge.min(reader_limits::DIAGRAM_PREVIEW_EDGE);
+    let mut bytes_used = 0;
+    let mut pixels_used = 0_u64;
+    requests.retain(|diagram| {
+        if cancelled.load(Ordering::Relaxed) {
+            return false;
+        }
+        if let Some(image) = cached_image(diagram, edge) {
+            bytes_used += image.png.len();
+            pixels_used += u64::from(image.width) * u64::from(image.height) * 4;
+            if bytes_used <= reader_limits::DIAGRAM_AGGREGATE_ENCODED_BYTES
+                && pixels_used <= reader_limits::DIAGRAM_AGGREGATE_DECODED_BYTES
+            {
+                publish(diagram.clone(), Ok((*image).clone()));
+                return false;
+            }
+            bytes_used -= image.png.len();
+            pixels_used -= u64::from(image.width) * u64::from(image.height) * 4;
+        }
+        true
+    });
+    if requests.is_empty() || cancelled.load(Ordering::Relaxed) {
+        return Ok(total);
+    }
     let dir = tempfile::tempdir()?;
     let input = dir.path().join("request.json");
     let output = dir.path().join("result.json");
@@ -386,16 +487,6 @@ pub fn render_page(
             Arc::new(fonts)
         })
         .clone();
-    let per_image = (reader_limits::DIAGRAM_AGGREGATE_ENCODED_BYTES as u64)
-        .min(reader_limits::DIAGRAM_AGGREGATE_DECODED_BYTES)
-        / requests.len().max(1) as u64;
-    let edge = ((per_image.saturating_sub(reader_limits::IO_BUFFER_BYTES as u64) / 4) as f64)
-        .sqrt()
-        .floor()
-        .max(1.) as u32;
-    let edge = edge.min(reader_limits::DIAGRAM_PREVIEW_EDGE);
-    let mut bytes_used = 0;
-    let mut pixels_used = 0_u64;
     let mut completed = HashSet::new();
     let mut timed_out = false;
     loop {
@@ -482,6 +573,9 @@ pub fn render_page(
                     .unwrap_or(&missing_reason)
                     .to_owned())
             };
+            if let Ok(image) = &result {
+                remember_image(diagram, edge, image);
+            }
             completed.insert(index);
             publish(diagram.clone(), result);
         }

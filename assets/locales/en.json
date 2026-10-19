@@ -368,6 +368,14 @@
   "Save this page before navigating.": "Save this page before navigating.",
   "Preparing video…": "Preparing video…",
   "Original resolution": "Original resolution",
+  "Zoom in": "Zoom in",
+  "Zoom out": "Zoom out",
+  "Cell data": "Cell data",
+  "Show more worksheets": "Show more worksheets",
+  "%d worksheets": "%d worksheets",
+  "Cannot open workbook cache.": "Cannot open workbook cache.",
+  "Rows %start–%end / %total · Columns %first–%last": "Rows %start–%end / %total · Columns %first–%last",
+  "Workbook preview is unavailable. Use Cell data to read the complete workbook.": "Workbook preview is unavailable. Use Cell data to read the complete workbook.",
   "Fit image": "Fit image",
   "Cannot open image": "Cannot open image",
   "Move to Trash…": "Move to Trash…",
@@ -394,5 +402,12 @@
   "Formula": "Formula",
   "Read-only worksheet cells · Saved formula results · Select a worksheet, page through cells, or double-click a value to read it in full.": "Read-only worksheet cells · Saved formula results · Select a worksheet, page through cells, or double-click a value to read it in full.",
   "Cancel save": "Cancel save",
-  "Copy page": "Copy page"
+  "Copy page": "Copy page",
+  "Rendering diagram…": "Rendering diagram…",
+  "Show reader controls": "Show reader controls",
+  "Open with Another App…": "Open with Another App…",
+  "Choose Application…": "Choose Application…",
+  "Choose an application other than Glim.": "Choose an application other than Glim.",
+  "Cannot open this file in the selected application.": "Cannot open this file in the selected application.",
+  "Choose an application for this file. Its default application will not change.": "Choose an application for this file. Its default application will not change."
 }

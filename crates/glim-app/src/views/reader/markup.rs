@@ -2,7 +2,7 @@ use super::{OpenLink, diagrams::DiagramPreview, pictures::Pictures, source::Sour
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     base::{TextView, TextViewState},
-    component::{ActiveTheme, scroll::Scrollbar},
+    component::ActiveTheme,
     *,
 };
 use std::{cell::Cell, collections::HashMap, ops::Range, path::Path, rc::Rc};
@@ -14,10 +14,13 @@ pub(super) struct MarkupReader {
     browser: Option<Entity<super::native::NativeReader>>,
     pub(super) state: Entity<TextViewState>,
     pub scroll: ScrollHandle,
+    pending_scroll: Option<ListOffset>,
     base: url::Url,
     headings: HashMap<String, Range<usize>>,
     pending_anchor: Option<String>,
     preview_text: String,
+    initial_preview: Option<String>,
+    preview_generation: Rc<Cell<usize>>,
     format_path: Option<std::path::PathBuf>,
     _subscription: Subscription,
     reveal_pending: Rc<Cell<bool>>,
@@ -54,7 +57,7 @@ impl MarkupReader {
             if html {
                 TextViewState::html("", cx)
             } else {
-                TextViewState::markdown(preview_content, cx)
+                TextViewState::markdown("", cx)
             }
         });
         let base = url::Url::from_file_path(path).expect("absolute document path");
@@ -72,11 +75,10 @@ impl MarkupReader {
         });
         let picture_subscription = cx.observe(&pictures, |_, cx| cx.refresh_windows());
         let reveal_pending = Rc::new(Cell::new(false));
-        let pending = reveal_pending.clone();
         let subscription = cx.observe(&state, move |_, cx| {
-            if pending.get() {
-                cx.refresh_windows();
-            }
+            // Parsing completes asynchronously, including when no anchor is pending.
+            // Refresh the reader so its initial loading state cannot remain blank.
+            cx.refresh_windows();
         });
         let diagrams =
             (!html).then(|| cx.new(|cx| DiagramPreview::new(preview_content.into(), cx)));
@@ -112,14 +114,24 @@ impl MarkupReader {
             ),
             state,
             scroll,
+            pending_scroll: None,
             preview,
             html,
             base,
             headings: headings(preview_content),
             pending_anchor: None,
             preview_text: text.to_owned(),
+            initial_preview: (!html).then(|| preview_content.to_owned()),
+            preview_generation: Rc::new(Cell::new(0)),
             format_path,
         }
+    }
+    pub fn refresh_dependencies(&mut self, cx: &mut App) {
+        self.pictures
+            .update(cx, |pictures, cx| pictures.refresh_local_images(cx));
+    }
+    pub fn inherit_preview_scroll(&mut self, old: &Self, cx: &App) {
+        self.pending_scroll = Some(old.state.read(cx).list_state().logical_scroll_top());
     }
     pub fn sync_preview(&mut self, cx: &mut App) {
         let text = self.source.state.read(cx).value().to_string();
@@ -127,6 +139,9 @@ impl MarkupReader {
             return;
         }
         self.preview_text.clone_from(&text);
+        self.initial_preview = None;
+        self.preview_generation
+            .set(self.preview_generation.get().wrapping_add(1));
         if let Some(browser) = &self.browser {
             browser.update(cx, |browser, cx| browser.update_html(text, cx));
             return;
@@ -178,6 +193,18 @@ impl MarkupReader {
             browser.update(cx, |browser, _| browser.set_html_open(open));
             return browser.clone().into_any_element();
         }
+        if let Some(text) = self.initial_preview.take() {
+            let state = self.state.downgrade();
+            let generation = self.preview_generation.clone();
+            let revision = generation.get();
+            // First configure the Markdown plugins in this frame, then enqueue
+            // the text once. Do not parse once without plugins and again with them.
+            cx.defer(move |cx| {
+                if generation.get() == revision {
+                    let _ = state.update(cx, |state, cx| state.set_text(&text, cx));
+                }
+            });
+        }
         if self
             .pending_anchor
             .as_ref()
@@ -201,28 +228,49 @@ impl MarkupReader {
                 self.reveal_pending.set(false);
             }
         }
-        self.source
-            .minimap
-            .update(cx, |map, cx| map.set_preview(true, cx));
+        let list = self.state.read(cx).list_state().clone();
+        list.measure_visible(px(42.));
+        if !self.state.read(cx).rendered_text().source().is_empty()
+            && let Some(offset) = self.pending_scroll.take()
+        {
+            let list = list.clone();
+            // Apply after the newly parsed document has reset its block list.
+            cx.defer(move |cx| {
+                if list.item_count() > 0 {
+                    list.scroll_to(ListOffset {
+                        item_ix: offset.item_ix.min(list.item_count() - 1),
+                        offset_in_item: offset.offset_in_item,
+                    });
+                    cx.refresh_windows();
+                }
+            });
+        }
+
+        self.source.minimap.update(cx, |map, cx| {
+            map.set_preview_list(list.clone(), cx);
+            map.set_preview(true, cx);
+        });
         let image_base = self.base.clone();
         let pictures = self.pictures.read(cx).sources.clone();
         let animations = self.pictures.read(cx).animations.clone();
         let stills = self.pictures.read(cx).stills.clone();
         let dark = cx.theme().is_dark();
         let link_base = self.base.clone();
-        let scroll = self.scroll.clone();
-        let minimap = self.source.minimap.clone();
-        // gpui-base 0.7.1 gives an unclamped document state `h_full`, even
-        // when its outer viewport owns scrolling. An unbounded line cap uses
-        // its natural-height layout instead, without limiting document lines.
-        // This keeps bottom images (including asynchronously loaded charts)
-        // inside the extent measured by our ScrollHandle.
+        let minimap = self.source.minimap.downgrade();
+        list.set_scroll_handler(move |_, _, cx| {
+            let _ = minimap.update(cx, |_, cx| cx.notify());
+        });
+        // The viewport owns a virtual block list; offscreen tables are not
+        // rebuilt and laid out on every wheel event.
         let text_view = TextView::new(&self.state)
             .text_size(px(14.))
-            .scrollable(false)
-            .max_lines(usize::MAX)
-            .w_full()
-            .flex_shrink_0();
+            .scrollable(true)
+            .size_full()
+            // Keep document padding inside the viewport so the component's
+            // absolute scrollbar stays at the reading area's outer edge.
+            .px_6()
+            .py_4()
+            .pr(px(136.));
         let text_view = if let Some(diagrams) = &self.diagrams {
             text_view.markdown_extensions(super::diagrams::with_alerts(
                 diagrams.read(cx).extensions.clone(),
@@ -244,12 +292,6 @@ impl MarkupReader {
                 div()
                     .id(("markdown-scroll", self.state.entity_id()))
                     .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .on_scroll_wheel(move |_, _, cx| minimap.update(cx, |_, cx| cx.notify()))
-                    .px_6()
-                    .py_4()
-                    .pr(px(124.))
                     .child(
                         text_view
                             .image_source(move |uri| {
@@ -294,16 +336,6 @@ impl MarkupReader {
                             })
                             .on_link_click(move |href, _, window, cx| {
                                 follow_link(&link_base, &open, href, window, cx);
-                            })
-                            .on_reveal(move |line, _, _| {
-                                let viewport = scroll.bounds();
-                                let mut offset = scroll.offset();
-                                if line.bottom() > viewport.bottom() {
-                                    offset.y -= line.bottom() - viewport.bottom();
-                                } else if line.top() < viewport.top() {
-                                    offset.y += viewport.top() - line.top();
-                                }
-                                scroll.set_offset(offset);
                             }),
                     ),
             )
@@ -312,16 +344,31 @@ impl MarkupReader {
                     .absolute()
                     .top_0()
                     .bottom_0()
-                    .right_0()
+                    .right(px(12.))
                     .w(px(110.))
                     .child(self.source.minimap.clone()),
             )
-            .child(Scrollbar::vertical(&self.scroll));
+            .when(
+                !self.preview_text.trim().is_empty()
+                    && self.state.read(cx).rendered_text().source().is_empty(),
+                |view| {
+                    view.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .bg(cx.theme().background)
+                            .child(super::preview_loading(cx)),
+                    )
+                },
+            );
         gpui_kit::component::v_flex()
             .size_full()
             .min_h_0()
-            .when_some(diagram_controls, |view, controls| view.child(controls))
+            .relative()
             .child(div().flex_1().min_h_0().w_full().child(body))
+            .when_some(diagram_controls, |view, controls| {
+                view.child(super::controls::floating("diagram-controls", controls, cx))
+            })
             .into_any_element()
     }
 }

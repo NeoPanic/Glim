@@ -82,6 +82,11 @@ impl Workspace {
         if self.refresh_task.is_some() || self.repository_task.is_some() || self.is_saving() {
             return;
         }
+        for reader in &mut self.tabs {
+            if !reader.historical {
+                reader.refresh_dependencies(cx);
+            }
+        }
         let roots = self.roots.clone();
         let targets = self
             .tabs

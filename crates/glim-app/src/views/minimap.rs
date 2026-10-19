@@ -10,6 +10,7 @@ pub struct Minimap {
     lines: Arc<Vec<(u8, u8, i8)>>,
     preview_scroll: ScrollHandle,
     preview: bool,
+    preview_list: Option<ListState>,
     dragging: bool,
     bounds: Rc<Cell<Bounds<Pixels>>>,
     _subscription: Subscription,
@@ -48,6 +49,7 @@ impl Minimap {
             lines: Arc::new(lines),
             preview_scroll,
             preview: false,
+            preview_list: None,
             dragging: false,
             bounds: Rc::new(Cell::new(Bounds::default())),
             _subscription: subscription,
@@ -78,6 +80,10 @@ impl Minimap {
         cx.notify();
     }
 
+    pub fn set_preview_list(&mut self, list: ListState, _cx: &mut Context<Self>) {
+        self.preview_list = Some(list);
+    }
+
     pub fn set_preview(&mut self, preview: bool, cx: &mut Context<Self>) {
         if self.preview != preview {
             self.preview = preview;
@@ -97,12 +103,25 @@ impl Minimap {
         .max(1.);
         let fraction = (f32::from(position.y - bounds.origin.y) / height).clamp(0., 1.);
         if self.preview {
-            let max = self.preview_scroll.max_offset().y;
-            let visible = self.preview_scroll.bounds().size.height;
+            let (max, visible) = if let Some(list) = &self.preview_list {
+                (
+                    list.max_offset_for_scrollbar().y,
+                    list.viewport_bounds().size.height,
+                )
+            } else {
+                (
+                    self.preview_scroll.max_offset().y,
+                    self.preview_scroll.bounds().size.height,
+                )
+            };
             let offset = ((max + visible) * fraction - visible / 2.)
                 .max(px(0.))
                 .min(max);
-            self.preview_scroll.set_offset(point(px(0.), -offset));
+            if let Some(list) = &self.preview_list {
+                list.set_offset_from_scrollbar(point(px(0.), -offset));
+            } else {
+                self.preview_scroll.set_offset(point(px(0.), -offset));
+            }
             cx.notify();
         } else {
             self.source.update(cx, |state, cx| {
@@ -121,6 +140,7 @@ impl Render for Minimap {
         let bounds_cell = self.bounds.clone();
         let source = self.source.clone();
         let scroll = self.preview_scroll.clone();
+        let preview_list = self.preview_list.clone();
         let preview = self.preview;
         let foreground = cx.theme().muted_foreground.opacity(0.45);
         let added = cx.theme().green.opacity(0.6);
@@ -184,10 +204,23 @@ impl Render for Minimap {
                             ));
                         }
                         let (start, length) = if preview {
-                            let visible = f32::from(scroll.bounds().size.height);
-                            let full = f32::from(scroll.max_offset().y) + visible;
+                            let (visible, maximum, offset) = if let Some(list) = &preview_list {
+                                (
+                                    list.viewport_bounds().size.height,
+                                    list.max_offset_for_scrollbar().y,
+                                    list.scroll_px_offset_for_scrollbar().y,
+                                )
+                            } else {
+                                (
+                                    scroll.bounds().size.height,
+                                    scroll.max_offset().y,
+                                    scroll.offset().y,
+                                )
+                            };
+                            let visible = f32::from(visible);
+                            let full = f32::from(maximum) + visible;
                             if full > 0. {
-                                (-f32::from(scroll.offset().y) / full, visible / full)
+                                (-f32::from(offset) / full, visible / full)
                             } else {
                                 (0., 1.)
                             }

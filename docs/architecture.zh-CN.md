@@ -4,6 +4,12 @@
 
 专注于 macOS 的文件查看器。阅读器共用标签工作台；普通 UTF-8 文本支持基础编辑和自动保存，差异、历史内容、图片及二进制／文档预览保持只读。
 
+## 阅读器悬浮操作条
+
+`reader/controls` 为 CSV／地理表格、文本／十六进制分页、书籍、XMind、图片翻页和 Markdown 图表批次提供内容区底部居中的悬浮胶囊。标题、目录及工作表导航独立保留；滚动内容末尾留出可读空间，书籍中的源分页操作条错开显示。GPUI 胶囊使用主题半透明、边框和阴影，尚未实现背景模糊或光学折射。
+
+`native/FloatingReaderToolbar.swift` 为图片／SVG、PDF、媒体、字体、SQLite／XLSX 和 Office 提供对应的原生容器。支持的 SDK 构建通过 `GLIM_NATIVE_GLASS` 开关在 macOS 26+ 使用公开的 `NSGlassEffectView`；旧 SDK／旧系统使用 `NSVisualEffectView`，最低系统仍为 macOS 11。过宽操作条可横向滚动，媒体操作避开 AVKit 播放控制。SVG 继续使用隔离的流式图片文档，原生按钮只调用应用包装页的图片命令。文件字节操作经阅读器桥接返回，仅在阅读器可见时轮询，隐藏时取消；字节视图继续保留完整分页入口。 阅读操作条隐藏时不显示图标，鼠标在底部宽透明区域停留后显示，移出后延迟隐藏；按键拖动期间冻结显隐，结束拖动不触发展开。原生透明感应区不拦截文档点击。操作条按可见内容收缩，按钮使用带边界的表面，与次要色状态说明区分；行列翻页组仅在需要时出现。
+
 ## 模块与依赖方向
 
 ```text
@@ -64,13 +70,15 @@ Mermaid、Graphviz、PlantUML、flowchart.js、WaveDrom 和 MathJax 及许可证
 
 ## 内嵌 macOS 预览
 
-`native/Preview.swift`、`EmbeddedPreview.swift` 和 `SQLitePreview.swift` 将 PDFKit、AVKit、Quick Look、CoreText、工作表 WebView 和 SQLite 视图内嵌到标签，不启动独立预览应用或 Dock 图标。app build.rs 编译 Swift 静态库。`reader/native_bridge` 是限定主线程的窄 unsafe FFI 边界，将 NSView 挂到 GPUI AppKit 窗口；原生预览与更新桥接是 app 的限定 unsafe 例外，其余 app deny unsafe，core/services forbid unsafe。
+`native/Preview.swift`、`EmbeddedPreview.swift` 和 `SQLitePreview.swift` 将 PDFKit、AVKit、Quick Look、CoreText、工作表 WebView 和 SQLite 视图内嵌到标签，不启动独立预览应用或 Dock 图标。app build.rs 编译 Swift 静态库。`reader/native_bridge` 是限定主线程的窄 unsafe FFI 边界，将 NSView 挂到 GPUI AppKit 窗口；原生预览、右键菜单与更新桥接是 app 的限定 unsafe 例外，其余 app deny unsafe，core/services forbid unsafe。
 
 `services/matroska` 在后台检查有界 EBML 结构，将 H.264／AAC-LC 样本无损重新封装为临时 MP4，交由 AVKit 播放。AVC 参数集来自轨道配置或 Annex-B 帧，MP4 合成偏移保留帧重排。`services/preview` 保留临时媒体并映射原始路径到播放路径，保持文件身份和显示名称。无需安装或启动 FFmpeg，支持范围及预算见[格式限制](file-format-support.zh-CN.md)。
 
 `services/preview::prepare` 在后台校验文件，准备播放列表、数据库快照和磁盘工作表索引。每个 `reader/native` 实体保留控制器及准备数据。系统框架加载通过主线程队列调度，不在 GPUI render/layout 中读取文件。切换隐藏视图并暂停媒体，保留当前页码／播放位置；关闭先释放原生资源，再清理临时数据。工具包浮层暂时隐藏原生视图，可访问性节点和 responder chain 动作接入主窗口。
 
-PDF 与 Office/iWork 保持只读。`services/spreadsheet` 将 XLSX 关系、共享字符串及工作表 XML 流式写入临时 SQLite 索引，按工作表分页展示单元格地址、完整缓存值及公式；不复刻 Excel 网格排版，不重算公式。XLS 及不支持的结构使用 Quick Look。字体仅查看，不安装。音频封面／元数据异步读取并可取消，装饰播放动效遵守减少动态效果设置，不代表真实频谱。
+SVG 图片在服务层清理后复用 `HTMLPreview` 和流式本地资源处理器，以静态图片显示；单一滚动容器提供适应窗口、实际大小及缩放控件，不执行 SVG 脚本或链接。栅格图片继续使用 ImageIO。图片预览不再显示文件字节底栏。栅格滚动容器在图片小于可视区域时双轴居中，适应窗口模式随视口调整重新计算。文件树和文档标签右键菜单通过独立的 `views/native_menu_bridge` AppKit 桥接显示，异步返回选择结果，所属实体释放时取消。菜单直接位于原生预览之上，不隐藏、暂停或替换阅读器；只有明确选择的动作才改变文件／工作区状态。 浏览器图片预处理保留 data URI 图片（含内嵌 SVG，不转为位图）、XHTML `foreignObject` 标签和完整样式表，SVG 图片沙箱阻止文档脚本及外部资源加载。百分比／缺失的根尺寸按 viewBox 或另一绝对尺寸推导，再用于缩放计算。
+
+PDF 与 Office/iWork 保持只读。`services/spreadsheet` 将 XLSX 关系、共享字符串及工作表 XML 流式写入临时 SQLite 索引，另以磁盘位置索引按行列页生成展示工作簿，由原生 Quick Look 的全尺寸 normal 样式呈现单元格样式、列宽、行高、合并与缓存值，预览视图四边约束到阅读区，不重算公式。“单元格数据”模式保留完整地址／值／公式索引。展示副本不包含图表及绘图，共享字符串保留文字但不保留分段富文本格式；私有应用辅助进程负责可取消的分页生成。XLS 及不支持的结构使用 Quick Look。字体仅查看，不安装。音频封面／元数据异步读取并可取消，装饰播放动效遵守减少动态效果设置，不代表真实频谱。
 
 `services/sqlite` 流式复制数据库／WAL／journal 并检查源状态，副本重建 SHM。原生 SQLite 在串行后台队列执行生成的只读查询，禁用扩展加载，不 checkpoint 或写入源文件。缺少主库的 sidecar 仅显示有界信息。
 
@@ -143,3 +151,11 @@ ImageIO 图片预览等待嵌入视图挂载且滚动视口尺寸有效后才执
 ### 非 Git 阅读器的可扩展处理
 
 `services/geo` 流式分页读取 GPX/KML；`services/xml` 为地理及 XLSX 阅读统一处理 XML 字符引用。`services/paged` 管理可编辑 UTF-8 分页和可取消的原子区间替换，刷新保留当前页及未变的编辑状态。`services/streamed` 在取消后重建解码器，并使用有界滚动缓存。大型单元格和结构文本通过字节窗口或磁盘源分页访问。图表分批渲染；书籍复杂章节保留导航并提供完整文本／十六进制资源分页。图片串行解码，在解码内存预算内缩放栅格，保留逻辑尺寸和完整源字节；这不是真正的原分辨率分块解码。SDK 临时分配、ZIP 中央目录索引和 SQLite 表达式计算仍受平台／库实现约束。Git/diff 优化另行处理。
+
+Markdown 预览使用 TextView 的固定视口虚拟块列表，替代全文自然高度控件；表格规范化仅在存在空行分隔的管线表格候选时建立 AST；图片与图表扫描在缺少必要语法标记时跳过 AST。首次预览在插件配置后才提交正文，无图表的扫描结果保持解析修订不变，避免重复全文解析。后台解析完成前显示居中加载提示，状态完成后刷新阅读器。缩略图导航与位置跟踪使用同一虚拟列表，锚点使用组件内置范围定位。屏幕外的块按需排版；单个超大块仍受组件块级布局实现影响。
+
+共享调度方向、格式专属中间表示、当前能力和待迁移项见[渲染管线](rendering-pipeline.md)。图表批次先识别引擎依赖，再按需并发导入离线 ESM 模块；字体使用内存映射，成功栅格结果使用有界进程内缓存。应用构建时内嵌完整模块清单，运行时不扫描项目目录寻找引擎。
+
+Markdown 的工作区刷新会在后台核对引用的本地静态图片元数据，即使 Markdown 正文本身没有变化。图片改变时重新解码，新帧准备好后替换旧帧；历史阅读器和远程图片不参与该文件系统刷新。
+
+Office 和工作簿的外部打开操作在点击时重新查询系统默认应用。默认应用为 Glim 时，提供兼容应用列表和应用选择器，按 bundle identifier 排除 Glim 的所有副本；选择器结果也再次校验。使用明确的应用 URL 打开文件，不更改文件关联。

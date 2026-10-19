@@ -1,13 +1,8 @@
 use glim_services::limits as reader_limits;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     base::InteractiveElementExt as _,
-    component::{
-        ActiveTheme, Disableable,
-        button::{Button, ButtonVariants},
-        h_flex,
-        scroll::Scrollbar,
-        v_flex,
-    },
+    component::{ActiveTheme, Disableable, button::Button, h_flex, scroll::Scrollbar, v_flex},
     *,
 };
 use std::{path::PathBuf, sync::Arc};
@@ -210,35 +205,16 @@ impl Render for CsvTable {
                     });
                 },
             ).absolute().size_full())
-            .child(h_flex().p_2().gap_2().text_xs()
-                .child(div().flex_1().min_w_0().truncate().child(if busy { glim_services::locale::tr("Loading table…") } else {
-                    self.error.clone().unwrap_or_else(|| format!("{} · rows {}–{} · columns {}–{}", self.format,
-                        self.row_start + 1, self.row_start + self.rows.len(), self.column_start + 1, self.column_start + columns))
-                }))
-                .child(Button::new("csv-prev").ghost().label(glim_services::locale::tr("Previous"))
-                    .disabled(busy || self.previous.is_empty()).on_click(cx.listener(|view, _, _, cx| {
-                        if let Some(start) = view.previous.pop() { view.row_start = start; view.load_page(cx); }
-                    })))
-                .child(Button::new("csv-next").ghost().label(glim_services::locale::tr("Next page"))
-                    .disabled(busy || !self.more).on_click(cx.listener(|view, _, _, cx| {
-                        view.previous.push(view.row_start); view.row_start += view.rows.len(); view.load_page(cx);
-                    })))
-                .child(Button::new("csv-prev-cols").ghost().label(glim_services::locale::tr("Previous columns"))
-                    .disabled(busy || self.column_start == 0).on_click(cx.listener(|view, _, _, cx| {
-                        view.column_start = view.column_start.saturating_sub(reader_limits::CSV_COLUMNS); view.load_page(cx);
-                    })))
-                .child(Button::new("csv-next-cols").ghost().label(glim_services::locale::tr("Next columns"))
-                    .disabled(busy || self.column_start + columns >= self.columns).on_click(cx.listener(|view, _, _, cx| {
-                        view.column_start += reader_limits::CSV_COLUMNS; view.load_page(cx);
-                    }))))
+
             .child(div().id("csv-horizontal").flex_1().min_h_0().overflow_x_scroll().track_scroll(&self.horizontal_scroll).child(
                 v_flex().w(px(width)).h_full()
                     .child(h_flex().h(px(32.)).child(div().w(px(64.)).child(glim_services::locale::tr("Row")))
                         .children((0..columns).map(|column| div().w(px(200.)).px_3().child(if geographic {
                             glim_services::locale::tr(match column { 0 => "Longitude", 1 => "Latitude", _ => "Altitude" })
                         } else { (self.column_start + column + 1).to_string() }))))
-                    .child(uniform_list("csv-rows", self.rows.len(), cx.processor(move |view, range: std::ops::Range<usize>, _, cx| {
+                    .child(uniform_list("csv-rows", self.rows.len() + 3, cx.processor(move |view, range: std::ops::Range<usize>, _, cx| {
                         range.map(|row| {
+                            if row >= view.rows.len() { return div().h(px(32.)).into_any_element(); }
                             h_flex().h(px(32.)).w_full().overflow_hidden().border_b_1().border_color(cx.theme().border)
                                 .child(div().w(px(64.)).flex_shrink_0().px_2().text_color(cx.theme().muted_foreground)
                                     .child((view.row_start + row + 1).to_string()))
@@ -260,6 +236,29 @@ impl Render for CsvTable {
             ))
             .child(div().h(Scrollbar::width()).flex_shrink_0().child(
                 Scrollbar::horizontal(&self.horizontal_scroll).viewport_from_layout(),
-            )).into_any_element()
+            )).child(super::controls::floating("csv-controls", h_flex().p_0().gap_2().text_xs()
+                .child(div().min_w_0().truncate().child(if busy { glim_services::locale::tr("Loading table…") } else {
+                    self.error.clone().unwrap_or_else(|| format!("{} · rows {}–{} · columns {}–{}", self.format,
+                        self.row_start + 1, self.row_start + self.rows.len(), self.column_start + 1, self.column_start + columns))
+                }))
+                .when(!self.previous.is_empty() || self.more, |bar| bar
+                .child(Button::new("csv-prev").label(glim_services::locale::tr("Previous"))
+                    .disabled(busy || self.previous.is_empty()).on_click(cx.listener(|view, _, _, cx| {
+                        if let Some(start) = view.previous.pop() { view.row_start = start; view.load_page(cx); }
+                    })))
+                .child(Button::new("csv-next").label(glim_services::locale::tr("Next page"))
+                    .disabled(busy || !self.more).on_click(cx.listener(|view, _, _, cx| {
+                        view.previous.push(view.row_start); view.row_start += view.rows.len(); view.load_page(cx);
+                    })))
+                )
+                .when(self.column_start > 0 || self.column_start + columns < self.columns, |bar| bar
+                .child(Button::new("csv-prev-cols").label(glim_services::locale::tr("Previous columns"))
+                    .disabled(busy || self.column_start == 0).on_click(cx.listener(|view, _, _, cx| {
+                        view.column_start = view.column_start.saturating_sub(reader_limits::CSV_COLUMNS); view.load_page(cx);
+                    })))
+                .child(Button::new("csv-next-cols").label(glim_services::locale::tr("Next columns"))
+                    .disabled(busy || self.column_start + columns >= self.columns).on_click(cx.listener(|view, _, _, cx| {
+                        view.column_start += reader_limits::CSV_COLUMNS; view.load_page(cx);
+                    })))), cx)).into_any_element()
     }
 }

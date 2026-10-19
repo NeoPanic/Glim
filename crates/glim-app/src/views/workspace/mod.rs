@@ -90,6 +90,7 @@ pub struct Workspace {
     autosave: std::collections::HashMap<EntityId, (Subscription, Option<Task<()>>)>,
     save_queue: std::collections::VecDeque<EntityId>,
     confirm_task: Option<Task<()>>,
+    context_menu_task: Option<Task<()>>,
 }
 
 impl Workspace {
@@ -234,6 +235,7 @@ impl Workspace {
             autosave: Default::default(),
             save_queue: Default::default(),
             confirm_task: None,
+            context_menu_task: None,
         };
         if let Some(path) = path {
             workspace.open_path(path, window, cx);

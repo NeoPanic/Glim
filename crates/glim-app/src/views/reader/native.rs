@@ -27,6 +27,7 @@ pub(super) struct NativeReader {
     html_open: Option<super::OpenLink>,
     html_anchor: Option<String>,
     _html_navigation: Option<Task<()>>,
+    reader_actions: std::cell::RefCell<Option<Task<()>>>,
 }
 impl NativeReader {
     pub fn html(
@@ -52,6 +53,7 @@ impl NativeReader {
             html_open: None,
             html_anchor: None,
             _html_navigation: None,
+            reader_actions: std::cell::RefCell::new(None),
         };
         // Create WebKit only when the preview is actually shown. Reader creation
         // may immediately switch to source mode and does not need an AppKit view.
@@ -135,7 +137,17 @@ impl NativeReader {
                 view.loading_bytes = false;
                 match result {
                     Ok(page) => {
-                        view.raw = Some(cx.new(|_| super::paged::PagedReader::readonly(page)))
+                        let parent = cx.entity().downgrade();
+                        view.raw = Some(cx.new(|_| {
+                            let mut reader = super::paged::PagedReader::readonly(page);
+                            reader.return_to_preview = Some(std::rc::Rc::new(move |cx| {
+                                let _ = parent.update(cx, |view, cx| {
+                                    view.raw = None;
+                                    cx.notify();
+                                });
+                            }));
+                            reader
+                        }))
                     }
                     Err(error) => view.error = Some(format!("{error:#}")),
                 }
@@ -182,6 +194,7 @@ impl NativeReader {
             html_open: None,
             html_anchor: None,
             _html_navigation: None,
+            reader_actions: std::cell::RefCell::new(None),
         };
         view.open(cx);
         view
@@ -226,6 +239,7 @@ impl NativeReader {
         cx.notify();
     }
     pub(super) fn hide(&self) {
+        self.reader_actions.borrow_mut().take();
         if let Some(preview) = &self.preview {
             preview.hide();
         }
@@ -261,26 +275,40 @@ impl Render for NativeReader {
             return super::preview_loading(cx);
         }
         if let Some(raw) = self.raw.clone() {
-            return v_flex()
-                .size_full()
-                .min_h_0()
-                .child(
-                    Button::new("native-return-preview")
-                        .ghost()
-                        .label(glim_services::locale::tr("Preview"))
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.raw = None;
-                            cx.notify();
-                        })),
-                )
-                .child(div().flex_1().min_h_0().w_full().child(raw))
-                .into_any_element();
+            return raw.into_any_element();
         }
         let bytes_available = self.html.is_none()
             && !self.html_file
             && !self.folder
+            && !glim_services::preview::is_image(&self.path)
             && !glim_services::preview::is_iwork(&self.path);
         if self.preview.is_some() {
+            if bytes_available && self.reader_actions.borrow().is_none() {
+                *self.reader_actions.borrow_mut() =
+                    Some(cx.spawn_in(window, async move |view, cx| {
+                        loop {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_millis(100))
+                                .await;
+                            if view
+                                .update_in(cx, |view, window, cx| {
+                                    if view
+                                        .preview
+                                        .as_ref()
+                                        .and_then(|preview| preview.take_reader_action())
+                                        .as_deref()
+                                        == Some("bytes")
+                                    {
+                                        view.open_bytes(window, cx);
+                                    }
+                                })
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                    }));
+            }
             let view = cx.entity();
             let surface = canvas(
                 move |bounds, window, cx| {
@@ -295,40 +323,6 @@ impl Render for NativeReader {
                 .size_full()
                 .min_h_0()
                 .child(div().flex_1().min_h_0().w_full().child(surface))
-                .when(bytes_available, |view| {
-                    let original = self.path.clone();
-                    view.child(
-                        gpui_kit::component::h_flex()
-                            .px_2()
-                            .gap_2()
-                            .child(
-                                Button::new("native-file-bytes")
-                                    .ghost()
-                                    .label(glim_services::locale::tr("File bytes"))
-                                    .on_click(cx.listener(|view, _, window, cx| {
-                                        view.open_bytes(window, cx)
-                                    })),
-                            )
-                            .when(
-                                self.prepared
-                                    .as_ref()
-                                    .is_some_and(|prepared| prepared.is_spreadsheet()),
-                                |row| {
-                                    row.child(
-                                        Button::new("spreadsheet-original")
-                                            .ghost()
-                                            .label(glim_services::locale::tr("Open in Default App"))
-                                            .on_click(move |_, _, cx| {
-                                                if let Ok(url) = url::Url::from_file_path(&original)
-                                                {
-                                                    cx.open_url(url.as_str());
-                                                }
-                                            }),
-                                    )
-                                },
-                            ),
-                    )
-                })
                 .into_any_element();
         }
         v_flex()

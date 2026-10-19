@@ -17,6 +17,7 @@ unsafe extern "C" {
     );
     fn glim_preview_hide(handle: *mut c_void);
     fn glim_preview_release(handle: *mut c_void);
+    fn glim_preview_take_reader_action(handle: *mut c_void) -> *mut std::ffi::c_char;
     fn glim_preview_take_navigation(handle: *mut c_void) -> *mut std::ffi::c_char;
     fn glim_preview_free_string(string: *mut std::ffi::c_char);
     fn glim_preview_reveal_anchor(handle: *mut c_void, bytes: *const u8, length: usize);
@@ -70,6 +71,21 @@ impl NativePreview {
                 .into_owned();
             glim_preview_free_string(pointer);
             Some(url)
+        }
+    }
+    pub fn take_reader_action(&self) -> Option<String> {
+        // SAFETY: Swift returns an owned UTF-8 string on the UI thread, copied
+        // before its matching deallocator; the controller remains retained.
+        unsafe {
+            let pointer = glim_preview_take_reader_action(self.handle.as_ptr());
+            if pointer.is_null() {
+                return None;
+            }
+            let action = std::ffi::CStr::from_ptr(pointer)
+                .to_string_lossy()
+                .into_owned();
+            glim_preview_free_string(pointer);
+            Some(action)
         }
     }
     pub fn reveal_anchor(&self, anchor: &str) {

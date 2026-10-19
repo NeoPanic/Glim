@@ -151,6 +151,10 @@ fn download_url(value: &str) -> Result<url::Url> {
 /// Image references actually present in rendered Markdown or HTML.
 /// Code blocks and examples do not initiate downloads.
 pub fn image_uris(text: &str, html: bool) -> HashSet<String> {
+    // Markdown images require `!`; embedded HTML images require `<`.
+    if !html && !text.contains(['!', '<']) {
+        return HashSet::new();
+    }
     use markdown::mdast::Node;
     let mut images = HashSet::new();
     let mut fragments = Vec::new();

@@ -1,5 +1,6 @@
 mod books;
 mod boundary;
+mod controls;
 mod csv;
 mod diagrams;
 mod diff;
@@ -97,6 +98,12 @@ pub struct Reader {
     renderer: Renderer,
 }
 impl Reader {
+    pub(crate) fn refresh_dependencies(&mut self, cx: &mut App) {
+        if let Renderer::Markup(markup) = &mut self.renderer {
+            markup.refresh_dependencies(cx);
+        }
+    }
+
     pub fn new(document: Document, window: &mut Window, cx: &mut App) -> Self {
         let html = document
             .path
@@ -670,7 +677,7 @@ impl Reader {
             (Renderer::Markup(s), Renderer::Markup(o)) => {
                 s.source.inherit(&o.source, cx);
                 s.preview = o.preview;
-                s.scroll.set_offset(o.scroll.offset());
+                s.inherit_preview_scroll(o, cx);
             }
             (Renderer::Diff(s), Renderer::Diff(o)) => {
                 s.source.inherit(&o.source, cx);

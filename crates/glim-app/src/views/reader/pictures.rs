@@ -97,6 +97,14 @@ impl Pictures {
         }));
         cx.notify();
     }
+    pub fn refresh_local_images(&mut self, cx: &mut Context<Self>) {
+        if !self.active {
+            return;
+        }
+        for image in self.stills.values() {
+            image.update(cx, |image, cx| image.refresh(cx));
+        }
+    }
     pub fn set_active(&mut self, active: bool, cx: &mut App) {
         self.active = active;
         let dark = cx.theme().is_dark();

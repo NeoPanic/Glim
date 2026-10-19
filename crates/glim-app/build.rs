@@ -1,5 +1,6 @@
 use std::{env, path::PathBuf, process::Command};
 fn main() {
+    embed_diagram_assets();
     println!("cargo:rerun-if-changed=../../assets/reader-limits.json");
     println!("cargo:rerun-if-changed=../../scripts/generate-reader-limits.py");
     let limits_out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
@@ -36,8 +37,10 @@ fn build_native_preview() {
     for source in [
         "Preview.swift",
         "ImagePreview.swift",
+        "FloatingReaderToolbar.swift",
         "HTMLPreview.swift",
         "SQLitePreview.swift",
+        "WorkbookPreview.swift",
         "EmbeddedPreview.swift",
     ] {
         println!("cargo:rerun-if-changed=../../native/{source}");
@@ -48,9 +51,22 @@ fn build_native_preview() {
         _ => panic!("Unsupported macOS architecture"),
     };
     let output = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let status = Command::new("xcrun")
+    let mut compiler = Command::new("xcrun");
+    let sdk = Command::new("xcrun")
+        .arg("--show-sdk-path")
+        .output()
+        .expect("macOS SDK path");
+    let sdk = PathBuf::from(String::from_utf8_lossy(&sdk.stdout).trim());
+    if sdk
+        .join("System/Library/Frameworks/AppKit.framework/Headers/NSGlassEffectView.h")
+        .is_file()
+    {
+        compiler.arg("swiftc").arg("-DGLIM_NATIVE_GLASS");
+    } else {
+        compiler.arg("swiftc");
+    }
+    let status = compiler
         .args([
-            "swiftc",
             "-O",
             "-swift-version",
             "5",
@@ -62,8 +78,10 @@ fn build_native_preview() {
             &format!("{arch}-apple-macos11.0"),
             "../../native/Preview.swift",
             "../../native/ImagePreview.swift",
+            "../../native/FloatingReaderToolbar.swift",
             "../../native/HTMLPreview.swift",
             "../../native/SQLitePreview.swift",
+            "../../native/WorkbookPreview.swift",
             "../../native/EmbeddedPreview.swift",
         ])
         .arg(output.join("ReaderLimits.swift"))
@@ -136,4 +154,47 @@ fn build_updater() {
     if env::var("PROFILE").as_deref() != Ok("release") {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{}", framework.display());
     }
+}
+
+// Dynamic engine imports are still served entirely from the signed executable.
+fn embed_diagram_assets() {
+    let root = std::fs::canonicalize("../../assets/markdown").expect("diagram assets");
+    println!("cargo:rerun-if-changed={}", root.display());
+    let mut pending = vec![root.clone()];
+    let mut files = Vec::new();
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(directory).expect("diagram asset directory") {
+            let path = entry.expect("diagram asset entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path
+                .extension()
+                .is_some_and(|ext| ext == "js" || ext == "html" || ext == "wasm")
+            {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    let entries = files
+        .iter()
+        .map(|path| {
+            let route = format!("/{}", path.strip_prefix(&root).unwrap().to_string_lossy());
+            let mime = match path.extension().unwrap().to_str().unwrap() {
+                "html" => "text/html; charset=utf-8",
+                "wasm" => "application/wasm",
+                _ => "text/javascript; charset=utf-8",
+            };
+            format!(
+                "({route:?}, {mime:?}, include_bytes!({:?}))",
+                path.to_str().unwrap()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n");
+    std::fs::write(
+        PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("diagram_assets.rs"),
+        format!("const DIAGRAM_ASSETS: &[(&str, &str, &[u8])] = &[{entries}];"),
+    )
+    .expect("embed diagram engine assets");
 }

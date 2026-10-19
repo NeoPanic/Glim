@@ -104,6 +104,7 @@ final class HTMLPreview: NSObject, WKNavigationDelegate {
     private var loaded = false
     private var anchor: String?
     var pendingNavigation: String?
+    var didLoad: (() -> Void)?
     init(document: URL, contents: String?) {
         self.document = document.standardizedFileURL
         var components = URLComponents()
@@ -148,6 +149,7 @@ final class HTMLPreview: NSObject, WKNavigationDelegate {
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loaded = true; loading.isHidden = true
+        didLoad?()
         if let anchor = anchor { reveal(anchor) }
     }
     private func failed(_ error: Error) {
@@ -160,6 +162,14 @@ final class HTMLPreview: NSObject, WKNavigationDelegate {
         self.anchor = anchor
         guard loaded, let data = try? JSONSerialization.data(withJSONObject: [anchor]), let argument = String(data: data, encoding: .utf8) else { return }
         web.evaluateJavaScript("(()=>{const id=\(argument)[0];const target=document.getElementById(id)||document.getElementsByName(id)[0];if(target)target.scrollIntoView();else if(!id)window.scrollTo(0,0);})()", completionHandler: nil)
+    }
+    // Commands are provided by Glim's static image wrapper, never by user SVG.
+    func imageCommand(_ command: String, completion: @escaping (Double?) -> Void) {
+        guard loaded, let data = try? JSONSerialization.data(withJSONObject: [command]),
+              let argument = String(data: data, encoding: .utf8) else { completion(nil); return }
+        web.evaluateJavaScript("window.glimImageViewer?.command(\(argument)[0])") { result, _ in
+            completion((result as? NSNumber)?.doubleValue)
+        }
     }
     func close() {
         web.stopLoading(); web.navigationDelegate = nil

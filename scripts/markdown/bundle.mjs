@@ -1,16 +1,17 @@
 // Development-only asset generation. Node/npm are not used by the desktop app.
 import { build } from 'esbuild';
-import { copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const output = path.resolve(here, '../../assets/markdown');
 await mkdir(output, { recursive: true });
-await build({
+await rm(path.join(output, 'chunks'), { recursive: true, force: true });
+const bundled = await build({
   absWorkingDir: here, entryPoints: ['renderer.js'], bundle: true, minify: true,
-  format: 'iife', platform: 'browser', target: ['safari15', 'chrome100'],
-  outfile: path.join(output, 'renderer.js'), legalComments: 'linked',
+  format: 'esm', splitting: true, chunkNames: 'chunks/[name]-[hash]', platform: 'browser', target: ['safari15', 'chrome100'],
+  outdir: output, external: ['./plantuml.js', './themes.js', './c4.min.js'], legalComments: 'linked', metafile: true,
   plugins: [{
     name: 'd2-webkit-startup',
     setup(build) {
@@ -35,9 +36,9 @@ await build({
 for (const name of ['plantuml.js', 'themes.js', 'emoji.js', 'openiconic.js']) {
   await copyFile(path.join(here, 'node_modules/@plantuml/core', name), path.join(output, name));
 }
-for (const name of ['renderer.js', 'plantuml.js']) {
+for (const target of [...Object.keys(bundled.metafile.outputs).filter(name => name.endsWith('.js')).map(name => path.resolve(here, name)), path.join(output, 'plantuml.js')]) {
   execFileSync(process.execPath, ['--check', '--input-type=module'], {
-    input: await readFile(path.join(output, name)),
+    input: await readFile(target),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 }

@@ -2,6 +2,7 @@ pub(crate) mod about;
 mod changes;
 pub mod explorer;
 mod minimap;
+mod native_menu_bridge;
 mod reader;
 mod welcome;
 pub mod workspace;

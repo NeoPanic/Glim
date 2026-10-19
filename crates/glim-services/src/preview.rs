@@ -213,13 +213,20 @@ pub fn prepare_cancellable(
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"))
     {
-        Some(crate::svg_preview::prepare(path, cancel)?)
+        Some(crate::svg_preview::prepare_browser_image(path, cancel)?)
     } else {
         None
     };
     let mut configuration = serde_json::json!({"files": files, "shuffle": shuffle, "autoplay": autoplay, "office": !folder && is_office(path), "font": !folder && is_font(path),
         "sqlite": spreadsheet.as_ref().map(|s| s.database.as_path()).or_else(|| sqlite.as_ref().and_then(|s| s.database.as_deref())).and_then(|p| p.to_str()),
         "sqliteInfo": spreadsheet.as_ref().map(|s| &s.information).or_else(|| sqlite.as_ref().map(|s| &s.information))});
+    configuration["fileBytes"] = serde_json::json!(!folder && !is_image(path) && !is_iwork(path));
+    configuration["spreadsheetCache"] =
+        serde_json::json!(spreadsheet.as_ref().and_then(|sheet| sheet.cache.to_str()));
+    if spreadsheet.is_some() {
+        configuration["spreadsheetHelper"] = serde_json::json!(std::env::current_exe()?.to_str());
+    }
+    configuration["spreadsheetIndex"] = serde_json::json!(spreadsheet.is_some());
     configuration["image"] = serde_json::json!(!folder && is_image(path));
     configuration["imageWidth"] = serde_json::json!(image_size.map(|size| size.0));
     configuration["imageHeight"] = serde_json::json!(image_size.map(|size| size.1));

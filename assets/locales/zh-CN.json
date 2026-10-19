@@ -368,6 +368,14 @@
   "Save this page before navigating.": "请先保存当前页，再翻页。",
   "Preparing video…": "正在准备视频…",
   "Original resolution": "原始分辨率",
+  "Zoom in": "放大",
+  "Zoom out": "缩小",
+  "Cell data": "单元格数据",
+  "Show more worksheets": "显示更多工作表",
+  "%d worksheets": "%d 个工作表",
+  "Cannot open workbook cache.": "无法打开工作簿缓存。",
+  "Rows %start–%end / %total · Columns %first–%last": "行 %start–%end / %total · 列 %first–%last",
+  "Workbook preview is unavailable. Use Cell data to read the complete workbook.": "无法生成工作表版式预览，请切换“单元格数据”查看完整工作簿。",
   "Fit image": "适应窗口",
   "Cannot open image": "无法打开图片",
   "Move to Trash…": "移到废纸篓…",
@@ -394,5 +402,12 @@
   "Formula": "公式",
   "Read-only worksheet cells · Saved formula results · Select a worksheet, page through cells, or double-click a value to read it in full.": "只读工作表单元格 · 显示已保存的公式结果 · 可选择工作表、翻页浏览，或双击分页查看完整值。",
   "Cancel save": "取消保存",
-  "Copy page": "复制本页"
+  "Copy page": "复制本页",
+  "Rendering diagram…": "正在渲染图表…",
+  "Show reader controls": "显示阅读工具栏",
+  "Open with Another App…": "使用其他应用打开…",
+  "Choose Application…": "选择应用…",
+  "Choose an application other than Glim.": "请选择 Glim 以外的应用。",
+  "Cannot open this file in the selected application.": "无法在所选应用中打开此文件。",
+  "Choose an application for this file. Its default application will not change.": "选择用于打开此文件的应用，不会更改默认应用。"
 }

@@ -71,6 +71,7 @@ struct StateInner {
     scroll_handler: Option<Box<dyn FnMut(&ListScrollEvent, &mut Window, &mut App)>>,
     scrollbar_drag_start_height: Option<Pixels>,
     measuring_behavior: ListMeasuringBehavior,
+    estimated_item_height: Option<Pixels>,
     pending_scroll: Option<PendingScroll>,
     follow_state: FollowState,
 }
@@ -323,6 +324,7 @@ impl ListState {
             reset: false,
             scrollbar_drag_start_height: None,
             measuring_behavior: ListMeasuringBehavior::default(),
+            estimated_item_height: None,
             pending_scroll: None,
             follow_state: FollowState::default(),
         })));
@@ -336,6 +338,14 @@ impl ListState {
     pub fn measure_all(self) -> Self {
         self.0.borrow_mut().measuring_behavior = ListMeasuringBehavior::Measure(false);
         self
+    }
+
+    /// Opt out of an eager full-list measure pass. Existing measured heights
+    /// remain cached; offscreen items are measured as they enter the viewport.
+    pub fn measure_visible(&self, estimated_item_height: Pixels) {
+        let mut state = self.0.borrow_mut();
+        state.measuring_behavior = ListMeasuringBehavior::Visible;
+        state.estimated_item_height = Some(estimated_item_height.max(px(1.)));
     }
 
     /// Pre-populate every unmeasured item with a uniform height hint so the scrollbar thumb
@@ -519,12 +529,13 @@ impl ListState {
         let mut new_items = old_items.slice(&Count(old_range.start), Bias::Right);
         old_items.seek_forward(&Count(old_range.end), Bias::Right);
 
+        let size_hint = state.estimated_item_height.map(|height| size(px(0.), height));
         let mut spliced_count = 0;
         new_items.extend(
             focus_handles.into_iter().map(|focus_handle| {
                 spliced_count += 1;
                 ListItem::Unmeasured {
-                    size_hint: None,
+                    size_hint,
                     focus_handle,
                 }
             }),

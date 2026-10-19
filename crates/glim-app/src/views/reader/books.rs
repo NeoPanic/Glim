@@ -28,7 +28,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-
 fn book_label(text: &str) -> String {
     let mut label: String = text
         .chars()
@@ -39,7 +38,6 @@ fn book_label(text: &str) -> String {
     }
     label
 }
-
 pub(super) struct BookReader {
     book: Arc<Book>,
     state: ReadingState,
@@ -120,10 +118,13 @@ impl BookReader {
         }
     }
     fn install(&mut self, mut content: ChapterContent, cx: &mut Context<Self>) {
-        self.paged = content
-            .page
-            .take()
-            .map(|page| cx.new(|_| super::paged::PagedReader::readonly(page)));
+        self.paged = content.page.take().map(|page| {
+            cx.new(|_| {
+                let mut reader = super::paged::PagedReader::readonly(page);
+                reader.controls_bottom = px(128.);
+                reader
+            })
+        });
         self.images = Arc::new(
             content
                 .images
@@ -424,34 +425,45 @@ impl Render for BookReader {
         } else {
             (self.state.chapter as f32 + self.state.fraction) / self.book.chapters.len() as f32
         };
-        v_flex()
-            .size_full()
-            .min_h_0()
-            .track_focus(&self.focus)
-            .key_context("Ebook")
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|view, _, window, cx| window.focus(&view.focus, cx)),
-            )
-            .on_action(cx.listener(|view, _: &BookNextPage, _, cx| view.page(true, cx)))
-            .on_action(cx.listener(|view, _: &BookPreviousPage, _, cx| view.page(false, cx)))
-            .on_action(cx.listener(|view, _: &BookNextChapter, _, cx| view.chapter(true, cx)))
-            .on_action(cx.listener(|view, _: &BookPreviousChapter, _, cx| view.chapter(false, cx)))
-            .on_action(cx.listener(|view, _: &BookContents, _, cx| {
-                view.contents = !view.contents;
-                cx.notify();
-            }))
+        let metadata = h_flex().p_3().child(
+            v_flex()
+                .id("book-metadata")
+                .on_double_click(cx.listener(|view, _, window, cx| {
+                    super::source::show_text_dialog(
+                        tr("Book metadata"),
+                        format!("{}\n\n{}", view.book.title, view.book.author),
+                        window,
+                        cx,
+                    );
+                }))
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .truncate()
+                        .child(book_label(&self.book.title)),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .truncate()
+                        .child(format!(
+                            "{} · {}",
+                            self.book.format.label(),
+                            book_label(&self.book.author)
+                        )),
+                ),
+        );
+        let controls = v_flex()
+            .gap_1()
             .child(
                 h_flex()
-                    .flex_wrap()
                     .gap_2()
                     .items_center()
-                    .p_3()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
                     .child(
                         Button::new("book-contents")
-                            .ghost()
                             .small()
                             .selected(self.contents)
                             .label(tr("Contents"))
@@ -462,33 +474,7 @@ impl Render for BookReader {
                             })),
                     )
                     .child(
-                        v_flex().id("book-metadata")
-                            .on_double_click(cx.listener(|view, _, window, cx| {
-                                super::source::show_text_dialog(tr("Book metadata"), format!("{}\n\n{}", view.book.title, view.book.author), window, cx);
-                            }))
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .truncate()
-                                    .child(book_label(&self.book.title)),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .truncate()
-                                    .child(format!(
-                                        "{} · {}",
-                                        self.book.format.label(),
-                                        book_label(&self.book.author)
-                                    )),
-                            ),
-                    )
-                    .child(
                         Button::new("book-font-smaller")
-                            .ghost()
                             .small()
                             .label("A−")
                             .disabled(font <= 14.)
@@ -501,7 +487,6 @@ impl Render for BookReader {
                     .child(div().text_xs().child(format!("{font:.0}")))
                     .child(
                         Button::new("book-font-larger")
-                            .ghost()
                             .small()
                             .label("A+")
                             .disabled(font >= 32.)
@@ -513,7 +498,6 @@ impl Render for BookReader {
                     )
                     .child(
                         Button::new("book-font")
-                            .ghost()
                             .small()
                             .label(tr(if self.state.serif {
                                 "Serif"
@@ -528,7 +512,6 @@ impl Render for BookReader {
                     )
                     .child(
                         Button::new("book-spacing")
-                            .ghost()
                             .small()
                             .label(format!("{} {:.1}", tr("Spacing"), self.state.line_height))
                             .on_click(cx.listener(|v, _, _, cx| {
@@ -545,7 +528,6 @@ impl Render for BookReader {
                     )
                     .child(
                         Button::new("book-width")
-                            .ghost()
                             .small()
                             .label(tr("Page width"))
                             .on_click(cx.listener(|v, _, _, cx| {
@@ -562,7 +544,6 @@ impl Render for BookReader {
                     )
                     .child(
                         Button::new("book-paper")
-                            .ghost()
                             .small()
                             .selected(self.state.paper)
                             .label(tr("Paper"))
@@ -574,7 +555,6 @@ impl Render for BookReader {
                     )
                     .child(
                         Button::new("book-bookmark")
-                            .ghost()
                             .small()
                             .selected(marked)
                             .label(tr(if marked {
@@ -585,6 +565,56 @@ impl Render for BookReader {
                             .on_click(cx.listener(|v, _, _, cx| v.bookmark(cx))),
                     ),
             )
+            .child(
+                h_flex()
+                    .gap_3()
+                    .items_center()
+                    .child(
+                        Button::new("book-previous")
+                            .small()
+                            .label(tr("Previous page"))
+                            .on_click(cx.listener(|v, _, _, cx| v.page(false, cx))),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!(
+                                "{} / {} · {} · {:.0}%",
+                                self.state.chapter + 1,
+                                self.book.chapters.len(),
+                                self.book.chapters[self.state.chapter].title,
+                                progress * 100.
+                            )),
+                    )
+                    .child(
+                        Button::new("book-next")
+                            .small()
+                            .label(tr("Next page"))
+                            .on_click(cx.listener(|v, _, _, cx| v.page(true, cx))),
+                    ),
+            );
+        v_flex()
+            .relative()
+            .size_full()
+            .min_h_0()
+            .track_focus(&self.focus)
+            .key_context("Ebook")
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|view, _, window, cx| window.focus(&view.focus, cx)),
+            )
+            .on_action(cx.listener(|view, _: &BookNextPage, _, cx| view.page(true, cx)))
+            .on_action(cx.listener(|view, _: &BookPreviousPage, _, cx| view.page(false, cx)))
+            .on_action(cx.listener(|view, _: &BookNextChapter, _, cx| view.chapter(true, cx)))
+            .on_action(cx.listener(|view, _: &BookPreviousChapter, _, cx| view.chapter(false, cx)))
+            .on_action(cx.listener(|view, _: &BookContents, _, cx| {
+                view.contents = !view.contents;
+                cx.notify();
+            }))
+            .child(metadata)
             .child(
                 h_flex()
                     .flex_1()
@@ -709,7 +739,7 @@ impl Render for BookReader {
                                     .overflow_y_scroll()
                                     .track_scroll(&self.scroll)
                                     .child(
-                                        v_flex().w_full().items_center().py_6().child(
+                                        v_flex().w_full().items_center().pt_6().pb(px(128.)).child(
                                             div()
                                                 .w_full()
                                                 .max_w(px(self.state.page_width))
@@ -787,40 +817,6 @@ impl Render for BookReader {
                             ),
                     ),
             )
-            .child(
-                h_flex()
-                    .p_2()
-                    .gap_3()
-                    .items_center()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        Button::new("book-previous")
-                            .ghost()
-                            .small()
-                            .label(tr("Previous page"))
-                            .on_click(cx.listener(|v, _, _, cx| v.page(false, cx))),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!(
-                                "{} / {} · {} · {:.0}%",
-                                self.state.chapter + 1,
-                                self.book.chapters.len(),
-                                self.book.chapters[self.state.chapter].title,
-                                progress * 100.
-                            )),
-                    )
-                    .child(
-                        Button::new("book-next")
-                            .ghost()
-                            .small()
-                            .label(tr("Next page"))
-                            .on_click(cx.listener(|v, _, _, cx| v.page(true, cx))),
-                    ),
-            )
+            .child(super::controls::floating("book-controls", controls, cx))
     }
 }

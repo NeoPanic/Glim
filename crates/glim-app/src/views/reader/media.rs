@@ -42,35 +42,36 @@ impl ImageReader {
                     ),
             )
             .child(if count > 1 {
-                h_flex()
-                    .absolute()
-                    .bottom(px(8.))
-                    .left(px(24.))
-                    .gap_3()
-                    .child(
-                        Button::new("image-previous-page")
-                            .label(glim_services::locale::tr("Previous page"))
-                            .disabled(page == 0)
-                            .on_click(move |_, _, cx| {
-                                previous.update(cx, |index, cx| {
-                                    *index = index.saturating_sub(1);
-                                    cx.refresh_windows();
-                                })
-                            }),
-                    )
-                    .child(format!("{} / {}", page + 1, count))
-                    .child(
-                        Button::new("image-next-page")
-                            .label(glim_services::locale::tr("Next page"))
-                            .disabled(page + 1 == count)
-                            .on_click(move |_, _, cx| {
-                                next.update(cx, |index, cx| {
-                                    *index = (*index + 1).min(count - 1);
-                                    cx.refresh_windows();
-                                })
-                            }),
-                    )
-                    .into_any_element()
+                super::controls::floating(
+                    "image-page-controls",
+                    h_flex()
+                        .gap_3()
+                        .child(
+                            Button::new("image-previous-page")
+                                .label(glim_services::locale::tr("Previous page"))
+                                .disabled(page == 0)
+                                .on_click(move |_, _, cx| {
+                                    previous.update(cx, |index, cx| {
+                                        *index = index.saturating_sub(1);
+                                        cx.refresh_windows();
+                                    })
+                                }),
+                        )
+                        .child(format!("{} / {}", page + 1, count))
+                        .child(
+                            Button::new("image-next-page")
+                                .label(glim_services::locale::tr("Next page"))
+                                .disabled(page + 1 == count)
+                                .on_click(move |_, _, cx| {
+                                    next.update(cx, |index, cx| {
+                                        *index = (*index + 1).min(count - 1);
+                                        cx.refresh_windows();
+                                    })
+                                }),
+                        ),
+                    cx,
+                )
+                .into_any_element()
             } else {
                 div().into_any_element()
             })
@@ -91,12 +92,15 @@ pub(super) struct InlineImageReader {
     error: Option<String>,
     active: bool,
     task: Option<Task<()>>,
+    refresh_task: Option<Task<()>>,
+    file_stamp: Option<(u64, Option<std::time::SystemTime>)>,
 }
 
 impl InlineImageReader {
     pub fn new(url: url::Url, cx: &mut Context<Self>) -> Self {
         cx.on_release(|view, cx| {
             view.task = None;
+            view.refresh_task = None;
             if let Some(frame) = view.frame.take() {
                 release_image(frame, cx);
             }
@@ -108,6 +112,8 @@ impl InlineImageReader {
             error: None,
             active: false,
             task: None,
+            refresh_task: None,
+            file_stamp: None,
         }
     }
 
@@ -118,6 +124,7 @@ impl InlineImageReader {
         self.active = active;
         if !active {
             self.task = None;
+            self.refresh_task = None;
             self.error = None;
             if let Some(frame) = self.frame.take() {
                 release_image(frame, cx);
@@ -125,9 +132,47 @@ impl InlineImageReader {
             cx.notify();
             return;
         }
+        self.start_load(cx);
+    }
+
+    // Workspace change notifications also cover referenced local image files.
+    // Compare metadata on a worker; retain the current frame until its replacement is ready.
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        if !self.active
+            || self.task.is_some()
+            || self.refresh_task.is_some()
+            || self.url.scheme() != "file"
+        {
+            return;
+        }
+        let Ok(path) = self.url.to_file_path() else {
+            return;
+        };
+        let work = cx.background_executor().spawn(async move {
+            std::fs::metadata(path)
+                .ok()
+                .map(|m| (m.len(), m.modified().ok()))
+        });
+        self.refresh_task = Some(cx.spawn(async move |view, cx| {
+            let stamp = work.await;
+            let _ = view.update(cx, |view, cx| {
+                view.refresh_task = None;
+                if view.active && stamp != view.file_stamp {
+                    view.start_load(cx);
+                }
+            });
+        }));
+    }
+
+    fn start_load(&mut self, cx: &mut Context<Self>) {
         let url = self.url.clone();
         let (cancel, guard) = glim_services::work::Cancellation::task();
         let work = cx.background_executor().spawn(async move {
+            let stamp = url
+                .to_file_path()
+                .ok()
+                .and_then(|path| std::fs::metadata(path).ok())
+                .map(|m| (m.len(), m.modified().ok()));
             let mut frame = match url.scheme() {
                 "file" => glim_services::inline_images::from_file_cancellable(
                     &url.to_file_path()
@@ -143,7 +188,7 @@ impl InlineImageReader {
             for pixel in frame.buffer_mut().as_chunks_mut::<4>().0 {
                 pixel.swap(0, 2);
             }
-            Ok::<_, anyhow::Error>(Arc::new(RenderImage::new(vec![frame])))
+            Ok::<_, anyhow::Error>((Arc::new(RenderImage::new(vec![frame])), stamp))
         });
         self.task = Some(cx.spawn(async move |view, cx| {
             let _guard = guard;
@@ -151,8 +196,20 @@ impl InlineImageReader {
             let _ = view.update(cx, |view, cx| {
                 view.task = None;
                 match result {
-                    Ok(frame) => view.frame = Some(frame),
-                    Err(error) => view.error = Some(format!("{error:#}")),
+                    Ok((frame, stamp)) => {
+                        if let Some(old) = view.frame.replace(frame) {
+                            release_image(old, cx);
+                        }
+                        view.file_stamp = stamp;
+                        view.error = None;
+                        view.refresh(cx);
+                    }
+                    Err(error) => {
+                        if let Some(old) = view.frame.take() {
+                            release_image(old, cx);
+                        }
+                        view.error = Some(format!("{error:#}"));
+                    }
                 }
                 cx.notify();
             });

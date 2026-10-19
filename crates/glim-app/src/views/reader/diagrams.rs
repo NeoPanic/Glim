@@ -239,7 +239,11 @@ impl DiagramPreview {
                 }
             }
             let _ = view.update(cx, |view, cx| {
-                view.extensions = extensions(Arc::new(snapshot));
+                // An empty discovery result changes no diagram nodes. Keeping
+                // the parser revision avoids reparsing a diagram-free document.
+                if !snapshot.is_empty() {
+                    view.extensions = extensions(Arc::new(snapshot));
+                }
                 view.task = None;
                 view.total = total;
                 cx.notify();
@@ -415,13 +419,26 @@ impl MarkdownPlugin for DiagramPlugin {
                     })
                     .into_any_element()
             }
-            Preview::Pending => div()
+            Preview::Pending if data.inline => div()
                 .text_color(cx.theme().muted_foreground)
-                .child(if data.inline {
-                    data.source.clone()
-                } else {
-                    "正在渲染图表…".into()
-                })
+                .child(data.source.clone())
+                .into_any_element(),
+            Preview::Pending => div()
+                .py_2()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .px_3()
+                        .py_2()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .bg(cx.theme().muted.opacity(0.6))
+                        .text_sm()
+                        .text_color(cx.theme().foreground)
+                        .child(div().text_color(cx.theme().muted_foreground).child("◷"))
+                        .child(glim_services::locale::tr("Rendering diagram…")),
+                )
                 .into_any_element(),
         }
     }

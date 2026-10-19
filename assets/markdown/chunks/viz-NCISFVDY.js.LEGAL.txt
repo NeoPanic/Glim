@@ -1,0 +1,11 @@
+Bundled license information:
+
+@viz-js/viz/dist/viz.js:
+  /*!
+  Viz.js 3.31.0
+  Copyright (c) Michael Daines
+  
+  This distribution contains other software in object code form:
+  Graphviz https://www.graphviz.org
+  Expat https://libexpat.github.io
+  */

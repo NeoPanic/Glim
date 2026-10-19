@@ -1,19 +1,19 @@
 use glim_services::paged::{PageSource, TextPage};
 use gpui_kit::{
-    component::{
-        ActiveTheme, Disableable,
-        button::{Button, ButtonVariants},
-        h_flex, v_flex,
-    },
+    component::{ActiveTheme, Disableable, button::Button, h_flex, v_flex},
     prelude::FluentBuilder,
     *,
 };
 use std::ops::Range;
 
+type PreviewAction = std::rc::Rc<dyn Fn(&mut App)>;
+
 /// Virtual rows contain slices into one buffer, not one allocation per line.
 /// Paging replaces the buffer, so browsing an unbounded file stays bounded.
 pub(super) struct PagedReader {
     pub source_editor: Option<super::source::SourceReader>,
+    pub controls_bottom: Pixels,
+    pub return_to_preview: Option<PreviewAction>,
     pub saving: std::rc::Rc<std::cell::Cell<bool>>,
     page: TextPage,
     _source_owner: Option<glim_services::work::CancelOnDrop>,
@@ -54,6 +54,8 @@ impl PagedReader {
         Self {
             _source_owner: page.owner.take(),
             source_editor,
+            controls_bottom: px(16.),
+            return_to_preview: None,
             saving: std::rc::Rc::new(std::cell::Cell::new(false)),
             report_source: page.source.is_generated().then(|| page.source.clone()),
             widest_row,
@@ -248,88 +250,9 @@ impl Render for PagedReader {
         let previous = self.previous.last().copied();
         let next = self.page.end;
         v_flex()
+            .relative()
             .size_full()
             .min_h_0()
-            .child(
-                h_flex()
-                    .px_3()
-                    .py_1()
-                    .gap_2()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(div().flex_1().min_w_0().truncate().child(format!(
-                        "{} · bytes {}–{} / {}{}",
-                        glim_services::locale::tr(if self.source_editor.is_some() {
-                            "Editable page"
-                        } else {
-                            "Read-only preview"
-                        }),
-                        self.page.start,
-                        self.page.end,
-                        self.page.total,
-                        if self.page.total_known { "" } else { "+" }
-                    )))
-                    .when(self.source_editor.is_none(), |bar| {
-                        bar.child(
-                            Button::new("copy-reader-page")
-                                .ghost()
-                                .label(glim_services::locale::tr("Copy page"))
-                                .disabled(busy)
-                                .on_click(cx.listener(|view, _, _, cx| {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(
-                                        view.page.text.clone(),
-                                    ));
-                                })),
-                        )
-                    })
-                    .when(self.report_source.is_some(), |bar| {
-                        bar.child(
-                            Button::new("page-raw")
-                                .ghost()
-                                .label(glim_services::locale::tr(
-                                    if self.page.source.is_generated() {
-                                        "File bytes"
-                                    } else {
-                                        "Report"
-                                    },
-                                ))
-                                .disabled(busy)
-                                .on_click(cx.listener(|view, _, _, cx| view.toggle_raw(cx))),
-                        )
-                    })
-                    .child(
-                        Button::new("page-back")
-                            .ghost()
-                            .label(glim_services::locale::tr("Previous"))
-                            .disabled(busy || previous.is_none())
-                            .on_click(cx.listener(move |v, _, w, cx| {
-                                if let Some(offset) = previous {
-                                    v.load(offset, false, true, w, cx);
-                                }
-                            })),
-                    )
-                    .child(
-                        Button::new("page-next")
-                            .ghost()
-                            .label(glim_services::locale::tr("Next page"))
-                            .disabled(busy || !self.page.more)
-                            .on_click(
-                                cx.listener(move |v, _, w, cx| v.load(next, false, false, w, cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("page-all")
-                            .ghost()
-                            .label(glim_services::locale::tr("Expand this page"))
-                            .disabled(
-                                busy || self.page.source.binary
-                                    || (self.page.start == 0 && !self.page.more),
-                            )
-                            .on_click(
-                                cx.listener(|v, _, w, cx| v.load(v.page.start, true, false, w, cx)),
-                            ),
-                    ),
-            )
             .children(self.error.iter().map(|e| {
                 div()
                     .px_3()
@@ -342,10 +265,14 @@ impl Render for PagedReader {
             } else {
                 uniform_list(
                     "large-text",
-                    self.rows.len(),
+                    self.rows.len()
+                        + ((f32::from(self.controls_bottom) + 64.) / 22.).ceil() as usize,
                     cx.processor(|v, range: Range<usize>, _, cx| {
                         range
                             .map(|i| {
+                                if i >= v.rows.len() {
+                                    return div().h(px(22.));
+                                }
                                 div()
                                     .h(px(22.))
                                     .px_3()
@@ -366,5 +293,90 @@ impl Render for PagedReader {
                 .w_full()
                 .into_any_element()
             })
+            .child(super::controls::floating_at(
+                "paged-controls",
+                h_flex()
+                    .px_0()
+                    .py_0()
+                    .gap_2()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(div().min_w_0().truncate().child(format!(
+                        "{} · bytes {}–{} / {}{}",
+                        glim_services::locale::tr(if self.source_editor.is_some() {
+                            "Editable page"
+                        } else {
+                            "Read-only preview"
+                        }),
+                        self.page.start,
+                        self.page.end,
+                        self.page.total,
+                        if self.page.total_known { "" } else { "+" }
+                    )))
+                    .when_some(self.return_to_preview.clone(), |bar, action| {
+                        bar.child(
+                            Button::new("page-return-preview")
+                                .label(glim_services::locale::tr("Preview"))
+                                .on_click(move |_, _, cx| action(cx)),
+                        )
+                    })
+                    .when(self.source_editor.is_none(), |bar| {
+                        bar.child(
+                            Button::new("copy-reader-page")
+                                .label(glim_services::locale::tr("Copy page"))
+                                .disabled(busy)
+                                .on_click(cx.listener(|view, _, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(
+                                        view.page.text.clone(),
+                                    ));
+                                })),
+                        )
+                    })
+                    .when(self.report_source.is_some(), |bar| {
+                        bar.child(
+                            Button::new("page-raw")
+                                .label(glim_services::locale::tr(
+                                    if self.page.source.is_generated() {
+                                        "File bytes"
+                                    } else {
+                                        "Report"
+                                    },
+                                ))
+                                .disabled(busy)
+                                .on_click(cx.listener(|view, _, _, cx| view.toggle_raw(cx))),
+                        )
+                    })
+                    .child(
+                        Button::new("page-back")
+                            .label(glim_services::locale::tr("Previous"))
+                            .disabled(busy || previous.is_none())
+                            .on_click(cx.listener(move |v, _, w, cx| {
+                                if let Some(offset) = previous {
+                                    v.load(offset, false, true, w, cx);
+                                }
+                            })),
+                    )
+                    .child(
+                        Button::new("page-next")
+                            .label(glim_services::locale::tr("Next page"))
+                            .disabled(busy || !self.page.more)
+                            .on_click(
+                                cx.listener(move |v, _, w, cx| v.load(next, false, false, w, cx)),
+                            ),
+                    )
+                    .child(
+                        Button::new("page-all")
+                            .label(glim_services::locale::tr("Expand this page"))
+                            .disabled(
+                                busy || self.page.source.binary
+                                    || (self.page.start == 0 && !self.page.more),
+                            )
+                            .on_click(
+                                cx.listener(|v, _, w, cx| v.load(v.page.start, true, false, w, cx)),
+                            ),
+                    ),
+                self.controls_bottom,
+                cx,
+            ))
     }
 }
