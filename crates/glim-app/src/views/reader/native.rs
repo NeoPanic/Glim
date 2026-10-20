@@ -27,7 +27,6 @@ pub(super) struct NativeReader {
     html_open: Option<super::OpenLink>,
     html_anchor: Option<String>,
     _html_navigation: Option<Task<()>>,
-    reader_actions: std::cell::RefCell<Option<Task<()>>>,
 }
 impl NativeReader {
     pub fn html(
@@ -53,7 +52,6 @@ impl NativeReader {
             html_open: None,
             html_anchor: None,
             _html_navigation: None,
-            reader_actions: std::cell::RefCell::new(None),
         };
         // Create WebKit only when the preview is actually shown. Reader creation
         // may immediately switch to source mode and does not need an AppKit view.
@@ -194,7 +192,6 @@ impl NativeReader {
             html_open: None,
             html_anchor: None,
             _html_navigation: None,
-            reader_actions: std::cell::RefCell::new(None),
         };
         view.open(cx);
         view
@@ -239,7 +236,6 @@ impl NativeReader {
         cx.notify();
     }
     pub(super) fn hide(&self) {
-        self.reader_actions.borrow_mut().take();
         if let Some(preview) = &self.preview {
             preview.hide();
         }
@@ -283,32 +279,6 @@ impl Render for NativeReader {
             && !glim_services::preview::is_image(&self.path)
             && !glim_services::preview::is_iwork(&self.path);
         if self.preview.is_some() {
-            if bytes_available && self.reader_actions.borrow().is_none() {
-                *self.reader_actions.borrow_mut() =
-                    Some(cx.spawn_in(window, async move |view, cx| {
-                        loop {
-                            cx.background_executor()
-                                .timer(std::time::Duration::from_millis(100))
-                                .await;
-                            if view
-                                .update_in(cx, |view, window, cx| {
-                                    if view
-                                        .preview
-                                        .as_ref()
-                                        .and_then(|preview| preview.take_reader_action())
-                                        .as_deref()
-                                        == Some("bytes")
-                                    {
-                                        view.open_bytes(window, cx);
-                                    }
-                                })
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                    }));
-            }
             let view = cx.entity();
             let surface = canvas(
                 move |bounds, window, cx| {

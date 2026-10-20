@@ -100,9 +100,7 @@ impl Render for Workspace {
             .min_w_0()
             .overflow_hidden()
             .when(!self.file_fullscreen, |view| {
-                view.rounded(px(14.))
-                    .border_1()
-                    .border_color(cx.theme().border)
+                view.border_1().border_color(cx.theme().border)
             })
             .bg(cx.theme().background)
             .when(

@@ -409,5 +409,6 @@
   "Choose Application…": "选择应用…",
   "Choose an application other than Glim.": "请选择 Glim 以外的应用。",
   "Cannot open this file in the selected application.": "无法在所选应用中打开此文件。",
-  "Choose an application for this file. Its default application will not change.": "选择用于打开此文件的应用，不会更改默认应用。"
+  "Choose an application for this file. Its default application will not change.": "选择用于打开此文件的应用，不会更改默认应用。",
+  "Open with Another App": "用其他应用打开"
 }

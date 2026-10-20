@@ -438,7 +438,6 @@ final class MediaPreparation {
 }
 
 final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
-    var hasReaderActionBridge = false
     var closed = false
     let host = NativePreviewHost(frame: NSRect(x: 0, y: 0, width: 1000, height: 740))
     let player = AVPlayer()
@@ -471,8 +470,6 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
     var spreadsheetView: WKWebView?
     var fontPreview: FontPreview?
     var imagePreview: ImagePreview?
-    var pendingReaderAction: String?
-    private var supportsFileBytes = false
     var htmlPreview: HTMLPreview?
     var htmlAnchor: String?
     var sqlitePreview: SQLitePreview?
@@ -505,19 +502,18 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             if let anchor = htmlAnchor { preview.reveal(anchor) }
             return
         }
-        supportsFileBytes = playlist.fileBytes == true
         if playlist.spreadsheetIndex == true, let database = playlist.sqlite,
            let cache = playlist.spreadsheetCache, let helper = playlist.spreadsheetHelper {
             let preview = WorkbookPreview(database: database, cache: cache, helper: helper, information: playlist.sqliteInfo ?? "") { [weak self] in
                 guard let self = self else { return [] }
-                return self.readerActionButtons() + [self.externalOpenButton()]
+                return [self.externalOpenButton()]
             }
             workbookPreview = preview; preview.view.frame = host.bounds
             preview.view.autoresizingMask = [.width, .height]; host.addSubview(preview.view)
             return
         }
         if let info = playlist.sqliteInfo {
-            var actions = readerActionButtons()
+            var actions: [NSView] = []
             if playlist.spreadsheetIndex == true { actions.append(externalOpenButton()) }
             let preview = SQLitePreview(path: playlist.sqlite, information: info, extraControls: actions); sqlitePreview = preview
             preview.view.frame = host.bounds
@@ -533,7 +529,7 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             host.addSubview(preview.view); return
         }
         if playlist.font == true {
-            let preview = FontPreview(url: urls[0], extraControls: readerActionButtons()); fontPreview = preview
+            let preview = FontPreview(url: urls[0]); fontPreview = preview
             preview.view.frame = host.bounds
             preview.view.autoresizingMask = [.width, .height]
             host.addSubview(preview.view)
@@ -570,7 +566,6 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         }
         toolbar.addArrangedSubview(titleLabel)
         toolbar.addArrangedSubview(detailLabel)
-        readerActionButtons().forEach { toolbar.addArrangedSubview($0) }
         if pdf {
             guard let document = PDFDocument(url: urls[0]) else { throw NSError(domain: "Glim", code: 2, userInfo: [NSLocalizedDescriptionKey: "This PDF could not be opened."]) }
             if document.isLocked {
@@ -631,10 +626,6 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         // Leave AVKit's timeline clear when its own playback controls appear.
         FloatingReaderToolbar(items: toolbar).install(in: host, bottomInset: pdf ? 16 : 80)
     }
-    @objc private func requestFileBytes() { pendingReaderAction = "bytes" }
-    private func readerActionButtons() -> [NSView] {
-        (supportsFileBytes && hasReaderActionBridge) ? [button(L("File bytes"), #selector(requestFileBytes))] : []
-    }
     func showOffice(_ url: URL, spreadsheet: String? = nil) {
         let toolbar = NSStackView()
         toolbar.translatesAutoresizingMaskIntoConstraints = false
@@ -644,7 +635,6 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         toolbar.addArrangedSubview(titleLabel)
         toolbar.addArrangedSubview(externalOpenButton())
-        readerActionButtons().forEach { toolbar.addArrangedSubview($0) }
         if let html = spreadsheet {
             let configuration = WKWebViewConfiguration()
             configuration.defaultWebpagePreferences.allowsContentJavaScript = false
@@ -662,13 +652,23 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             web.loadHTMLString(html, baseURL: nil)
             return
         }
-        // Use the undecorated embedded presentation rather than Quick Look's
-        // full preview frame, which adds a page-edge rule beside Office slides.
-        // Auto Layout supplies the full content bounds beneath floating controls.
-        guard let preview = QLPreviewView(frame: .zero, style: .compact) else {
+        // Word-processing documents need the full-sized reading presentation.
+        // Inspector-style compact previews can leave a narrow document strip
+        // inside a large viewport. Slides retain their undecorated presentation.
+        let wordProcessing = ["doc", "docx", "rtf", "pages"].contains(url.pathExtension.lowercased())
+        let style: QLPreviewViewStyle = wordProcessing ? .normal : .compact
+        guard let preview = QLPreviewView(frame: .zero, style: style) else {
             let alert = NSAlert(); alert.messageText = L("Document preview is unavailable"); alert.informativeText = L("Open this document in its default app to view it."); alert.runModal(); return
         }
         officeView = preview
+        // Match the rectangular reading surface and clip remote preview content
+        // at the host bounds rather than exposing the chrome beneath corners.
+        host.wantsLayer = true
+        host.layer?.cornerRadius = 0
+        host.layer?.masksToBounds = true
+        preview.wantsLayer = true
+        preview.layer?.cornerRadius = 0
+        preview.layer?.masksToBounds = true
         preview.translatesAutoresizingMaskIntoConstraints = false
         preview.shouldCloseWithWindow = true
         preview.autostarts = true
@@ -691,9 +691,7 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         Bundle(url: application)?.bundleIdentifier == "io.github.jony4.glimpse"
     }
     private func externalOpenButton() -> NSButton {
-        let application = urls.first.flatMap { NSWorkspace.shared.urlForApplication(toOpen: $0) }
-        let title = application.map { !isGlim($0) } == true ? L("Open in Default App") : L("Open with Another App…")
-        return button(title, #selector(openOfficeExternally(_:)))
+        return button(L("Open with Another App"), #selector(openOfficeExternally(_:)))
     }
     private func openDocument(_ document: URL, with application: URL) {
         guard !isGlim(application) else {

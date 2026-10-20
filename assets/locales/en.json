@@ -409,5 +409,6 @@
   "Choose Application…": "Choose Application…",
   "Choose an application other than Glim.": "Choose an application other than Glim.",
   "Cannot open this file in the selected application.": "Cannot open this file in the selected application.",
-  "Choose an application for this file. Its default application will not change.": "Choose an application for this file. Its default application will not change."
+  "Choose an application for this file. Its default application will not change.": "Choose an application for this file. Its default application will not change.",
+  "Open with Another App": "Open with Another App"
 }

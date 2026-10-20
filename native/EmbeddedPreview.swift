@@ -5,7 +5,6 @@ import Cocoa
 func glimPreviewCreate(_ bytes: UnsafePointer<UInt8>, _ length: Int) -> UnsafeMutableRawPointer {
     precondition(Thread.isMainThread)
     let preview = NativePreviewController()
-    preview.hasReaderActionBridge = true
     preview.host.isHidden = true
     let data = Data(bytes: bytes, count: length)
     // AppKit/PDFKit/Quick Look loading occurs outside GPUI render/layout callbacks.
@@ -83,14 +82,6 @@ func glimPreviewTakeNavigation(_ handle: UnsafeMutableRawPointer) -> UnsafeMutab
     guard let html = preview.htmlPreview, let url = html.pendingNavigation else { return nil }
     html.pendingNavigation = nil
     return url.withCString { strdup($0) }
-}
-@_cdecl("glim_preview_take_reader_action")
-func glimPreviewTakeReaderAction(_ handle: UnsafeMutableRawPointer) -> UnsafeMutablePointer<CChar>? {
-    precondition(Thread.isMainThread)
-    let preview = Unmanaged<NativePreviewController>.fromOpaque(handle).takeUnretainedValue()
-    guard let action = preview.pendingReaderAction else { return nil }
-    preview.pendingReaderAction = nil
-    return action.withCString { strdup($0) }
 }
 @_cdecl("glim_preview_free_string")
 func glimPreviewFreeString(_ string: UnsafeMutablePointer<CChar>) { free(string) }

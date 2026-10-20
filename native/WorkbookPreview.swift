@@ -64,7 +64,7 @@ final class WorkbookPreview: NSObject {
         status.font = .systemFont(ofSize: 12); status.textColor = .secondaryLabelColor
         loading.maximumNumberOfLines = 4; loading.lineBreakMode = .byTruncatingTail
         let items = NSStackView()
-        [mode, picker, previous, status, next, previousColumns, nextColumns, moreSheets].forEach { items.addArrangedSubview($0) }
+        [mode, picker, previous, next, previousColumns, nextColumns, moreSheets, status].forEach { items.addArrangedSubview($0) }
         extraControls().forEach { items.addArrangedSubview($0) }
         previewToolbar = FloatingReaderToolbar(items: items); previewToolbar.install(in: view)
         controls()
@@ -138,10 +138,12 @@ final class WorkbookPreview: NSObject {
         next.isEnabled = !busy && selected < sheets.count && row + ReaderLimits.SQLITE_PAGE_ROWS < sheets[selected].rows
         previousColumns.isEnabled = !busy && column > 0
         nextColumns.isEnabled = !busy && selected < sheets.count && column + ReaderLimits.SQLITE_COLUMNS < sheets[selected].columns
-        previous.isHidden = selected < sheets.count && sheets[selected].rows <= ReaderLimits.SQLITE_PAGE_ROWS
-        next.isHidden = previous.isHidden
-        previousColumns.isHidden = selected < sheets.count && sheets[selected].columns <= ReaderLimits.SQLITE_COLUMNS
-        nextColumns.isHidden = previousColumns.isHidden
+        if !busy {
+            previous.isHidden = row == 0
+            next.isHidden = !next.isEnabled
+            previousColumns.isHidden = column == 0
+            nextColumns.isHidden = !nextColumns.isEnabled
+        }
         moreSheets.isHidden = !catalogMore; moreSheets.isEnabled = !busy && catalogMore
     }
     private func updateStatus() {
@@ -222,7 +224,7 @@ final class WorkbookPreview: NSObject {
             let segment = NSSegmentedControl(labels: [L("Preview"), L("Cell data")], trackingMode: .selectOne, target: self, action: #selector(changeMode(_:)))
             segment.selectedSegment = 1
             let sheet = selected < sheets.count ? sheets[selected] : nil
-            let data = SQLitePreview(path: database, information: information, extraControls: [segment] + extraControls(), worksheetCells: true, initialWorksheet: sheet.map { ($0.id, $0.name) })
+            let data = SQLitePreview(path: database, information: information, modeControl: segment, extraControls: extraControls(), worksheetCells: true, initialWorksheet: sheet.map { ($0.id, $0.name) })
             data.view.translatesAutoresizingMaskIntoConstraints = false
             body.addSubview(data.view)
             NSLayoutConstraint.activate([

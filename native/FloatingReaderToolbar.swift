@@ -7,6 +7,7 @@ final class FloatingReaderToolbar: NSView {
     private let material: NSView
     private let interior: NSView
     private var measuredSize = NSSize.zero
+    private var controlWidths: [ObjectIdentifier: NSLayoutConstraint] = [:]
     private let viewport = NSScrollView()
     private var expanded = false
     private var hoverArea: NSTrackingArea?
@@ -33,16 +34,27 @@ final class FloatingReaderToolbar: NSView {
         #endif
         super.init(frame: .zero)
         items.detachesHiddenViews = true
+        items.orientation = .horizontal
+        items.alignment = .centerY
+        items.distribution = .fill
         items.setHuggingPriority(.required, for: .horizontal)
         items.spacing = 6
         items.edgeInsets = NSEdgeInsets()
         items.translatesAutoresizingMaskIntoConstraints = true
+        for item in items.arrangedSubviews {
+            // Overflow belongs to the scroll viewport, never to individual
+            // controls. Keep selectors and action titles at readable widths.
+            item.setContentCompressionResistancePriority(.required, for: .horizontal)
+            items.setVisibilityPriority(.mustHold, for: item)
+            if let picker = item as? NSPopUpButton {
+                picker.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+            }
+        }
         for case let button as NSButton in items.arrangedSubviews where !(button is NSPopUpButton) {
             button.isBordered = true; button.bezelStyle = .rounded
             button.controlSize = .regular
             button.setContentHuggingPriority(.required, for: .horizontal)
             button.font = .systemFont(ofSize: 13, weight: .medium)
-            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 28).isActive = true
             button.heightAnchor.constraint(greaterThanOrEqualToConstant: 28).isActive = true
             let label = button.title == "+" ? L("Zoom in") : (["−", "-"].contains(button.title) ? L("Zoom out") : button.title)
             button.toolTip = label
@@ -67,14 +79,48 @@ final class FloatingReaderToolbar: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
     private var contentSize: NSSize {
-        // Status labels remain visually separate from bordered actions.
-        for case let label as NSTextField in items.arrangedSubviews {
-            label.textColor = .secondaryLabelColor
-            label.setContentHuggingPriority(.required, for: .horizontal)
-            label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // Measure the visible controls directly: stack fittingSize can inherit a
+        // previous narrow document frame and compress button cells to ellipses.
+        let visible = items.arrangedSubviews.filter { !$0.isHidden }
+        var width: CGFloat = 0, height: CGFloat = 28
+        for item in visible {
+            var measured = item.intrinsicContentSize
+            if let label = item as? NSTextField {
+                label.textColor = .secondaryLabelColor
+                label.setContentHuggingPriority(.required, for: .horizontal)
+            }
+            if let button = item as? NSButton {
+                let title = (button as? NSPopUpButton)?.selectedItem?.title ?? button.title
+                let font = button.font ?? NSFont.systemFont(ofSize: 13)
+                let textWidth = ceil((title as NSString).size(withAttributes: [.font: font]).width)
+                measured.width = max(measured.width, max(button is NSPopUpButton ? 160 : 28, textWidth + 32))
+            } else if let segments = item as? NSSegmentedControl {
+                let font = segments.font ?? NSFont.systemFont(ofSize: 13)
+                let labelWidth = (0..<segments.segmentCount).reduce(CGFloat(0)) {
+                    $0 + ceil(((segments.label(forSegment: $1) ?? "") as NSString).size(withAttributes: [.font: font]).width) + 24
+                }
+                measured.width = max(measured.width, labelWidth)
+            }
+            if measured.width < 0 || measured.height < 0 { measured = item.fittingSize }
+            for constraint in item.constraints where constraint.isActive && constraint.firstAttribute == .width && constraint.secondItem == nil {
+                if let own = controlWidths[ObjectIdentifier(item)], constraint === own { continue }
+                if constraint.relation == .greaterThanOrEqual || constraint.relation == .equal {
+                    measured.width = max(measured.width, constraint.constant)
+                }
+            }
+            if item is NSControl {
+                let key = ObjectIdentifier(item)
+                if let constraint = controlWidths[key] { constraint.constant = max(0, measured.width) }
+                else {
+                    let constraint = item.widthAnchor.constraint(greaterThanOrEqualToConstant: max(0, measured.width))
+                    constraint.isActive = true; controlWidths[key] = constraint
+                }
+            }
+            width += max(0, measured.width)
+            height = max(height, measured.height)
         }
-        items.layoutSubtreeIfNeeded()
-        return items.fittingSize
+        width += CGFloat(max(0, visible.count - 1)) * items.spacing
+        return NSSize(width: width, height: height)
     }
     override var intrinsicContentSize: NSSize {
         let size = contentSize
