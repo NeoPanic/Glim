@@ -66,6 +66,13 @@
       "total": 256,
       "release_count": 25,
       "asset_count": 130
+    },
+    {
+      "date": "2026-10-21",
+      "observed_at": "2026-10-21T04:00:29+08:00",
+      "total": 290,
+      "release_count": 26,
+      "asset_count": 136
     }
   ]
 }
