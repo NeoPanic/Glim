@@ -3,6 +3,8 @@ import Cocoa
 // One content-level capsule shared by the native readers. It overlays content
 // rather than consuming document height; wide controls remain horizontally scrollable.
 final class FloatingReaderToolbar: NSView {
+    private let controls: ReaderControls
+    private var contextMenu: ReaderContextMenu?
     private let items: NSStackView
     private let material: NSView
     private let interior: NSView
@@ -14,7 +16,10 @@ final class FloatingReaderToolbar: NSView {
     private var collapseTask: DispatchWorkItem?
     private var expandTask: DispatchWorkItem?
     private var releaseMonitor: Any?
-    init(items: NSStackView) {
+    convenience init(items: NSStackView) { self.init(controls: ReaderControls(stack: items)) }
+    init(controls: ReaderControls) {
+        self.controls = controls
+        let items = controls.stack()
         self.items = items
         let interior = NSView(); self.interior = interior
         #if GLIM_NATIVE_GLASS
@@ -44,16 +49,19 @@ final class FloatingReaderToolbar: NSView {
         for item in items.arrangedSubviews {
             // Overflow belongs to the scroll viewport, never to individual
             // controls. Keep selectors and action titles at readable widths.
-            item.setContentCompressionResistancePriority(.required, for: .horizontal)
+            item.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            item.setContentHuggingPriority(.defaultHigh, for: .horizontal)
             items.setVisibilityPriority(.mustHold, for: item)
             if let picker = item as? NSPopUpButton {
-                picker.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+                picker.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+                picker.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+                picker.cell?.lineBreakMode = .byTruncatingMiddle
             }
         }
         for case let button as NSButton in items.arrangedSubviews where !(button is NSPopUpButton) {
             button.isBordered = true; button.bezelStyle = .rounded
             button.controlSize = .regular
-            button.setContentHuggingPriority(.required, for: .horizontal)
+            button.setContentHuggingPriority(.defaultHigh, for: .horizontal)
             button.font = .systemFont(ofSize: 13, weight: .medium)
             button.heightAnchor.constraint(greaterThanOrEqualToConstant: 28).isActive = true
             let label = button.title == "+" ? L("Zoom in") : (["−", "-"].contains(button.title) ? L("Zoom out") : button.title)
@@ -87,19 +95,37 @@ final class FloatingReaderToolbar: NSView {
             var measured = item.intrinsicContentSize
             if let label = item as? NSTextField {
                 label.textColor = .secondaryLabelColor
-                label.setContentHuggingPriority(.required, for: .horizontal)
+                label.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+                let font = label.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize(for: label.controlSize))
+                let text = (label.stringValue as NSString).size(withAttributes: [.font: font])
+                measured.width = ceil(text.width)
+                measured.height = max(ceil(text.height), label.cell?.cellSize.height ?? 0)
             }
             if let button = item as? NSButton {
                 let title = (button as? NSPopUpButton)?.selectedItem?.title ?? button.title
-                let font = button.font ?? NSFont.systemFont(ofSize: 13)
+                let font = button.font ?? button.cell?.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize(for: button.controlSize))
                 let textWidth = ceil((title as NSString).size(withAttributes: [.font: font]).width)
-                measured.width = max(measured.width, max(button is NSPopUpButton ? 160 : 28, textWidth + 32))
+                if let picker = button as? NSPopUpButton {
+                    // A popup's intrinsic size can retain a previous large menu
+                    // width. Size the control from its current title instead.
+                    let imageWidth = picker.selectedItem?.image.map { $0.size.width + 6 } ?? 0
+                    measured.width = textWidth + imageWidth + 40
+                    picker.toolTip = title
+                } else {
+                    let imageWidth = button.image?.size.width ?? 0
+                    switch button.imagePosition {
+                    case .imageOnly: measured.width = max(28, imageWidth + 12)
+                    case .imageLeft, .imageRight, .imageLeading, .imageTrailing:
+                        measured.width = max(28, textWidth + (imageWidth > 0 ? imageWidth + 6 : 0) + 32)
+                    default: measured.width = max(28, max(textWidth, imageWidth) + 32)
+                    }
+                }
             } else if let segments = item as? NSSegmentedControl {
                 let font = segments.font ?? NSFont.systemFont(ofSize: 13)
                 let labelWidth = (0..<segments.segmentCount).reduce(CGFloat(0)) {
                     $0 + ceil(((segments.label(forSegment: $1) ?? "") as NSString).size(withAttributes: [.font: font]).width) + 24
                 }
-                measured.width = max(measured.width, labelWidth)
+                measured.width = labelWidth
             }
             if measured.width < 0 || measured.height < 0 { measured = item.fittingSize }
             for constraint in item.constraints where constraint.isActive && constraint.firstAttribute == .width && constraint.secondItem == nil {
@@ -112,7 +138,10 @@ final class FloatingReaderToolbar: NSView {
                 let key = ObjectIdentifier(item)
                 if let constraint = controlWidths[key] { constraint.constant = max(0, measured.width) }
                 else {
-                    let constraint = item.widthAnchor.constraint(greaterThanOrEqualToConstant: max(0, measured.width))
+                    // Fix every control to its measured content width. Minimum-
+                    // only constraints let stack layout stretch a status label
+                    // and feed that stretched intrinsic width into later passes.
+                    let constraint = item.widthAnchor.constraint(equalToConstant: max(0, measured.width))
                     constraint.isActive = true; controlWidths[key] = constraint
                 }
             }
@@ -211,9 +240,12 @@ final class FloatingReaderToolbar: NSView {
         collapseTask?.cancel(); expandTask?.cancel()
         if let monitor = releaseMonitor { NSEvent.removeMonitor(monitor) }
     }
-    func install(in host: NSView, bottomInset: CGFloat = 16) {
+    func install(in host: NSView, bottomInset: CGFloat = 16, managesContextMenu: Bool = true) {
         translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(self)
+        if managesContextMenu {
+            contextMenu = ReaderContextMenu(host: host) { [weak self] _ in self?.controls.menu() }
+        }
         let maximumWidth = widthAnchor.constraint(equalTo: host.widthAnchor, constant: -32)
         NSLayoutConstraint.activate([
             centerXAnchor.constraint(equalTo: host.centerXAnchor),

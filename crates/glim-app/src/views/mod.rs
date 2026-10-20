@@ -3,6 +3,7 @@ mod changes;
 pub mod explorer;
 mod minimap;
 mod native_menu_bridge;
+mod path_hint;
 mod reader;
 mod welcome;
 pub mod workspace;

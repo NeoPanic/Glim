@@ -4,6 +4,7 @@ mod gestures;
 mod git;
 mod header;
 mod loading;
+mod reader_actions;
 mod render;
 mod session;
 mod settings;
@@ -34,11 +35,13 @@ const DEFAULT_SIDEBAR_RATIO: f32 = 0.20;
 const SIDEBAR_COLLAPSE_WIDTH: f32 = 120.;
 
 pub struct Workspace {
+    path_hint: super::path_hint::PathHint,
     recent_id: String,
     restoring_roots: Option<Vec<PathBuf>>,
     focus: FocusHandle,
     page: Page,
     file_fullscreen: bool,
+    file_fullscreen_entered_window: bool,
     sidebar_selection: Option<&'static str>,
     history: Vec<header::Target>,
     history_cursor: Option<usize>,
@@ -170,6 +173,7 @@ impl Workspace {
             .unwrap_or(true)
         });
         let mut workspace = Self {
+            path_hint: Default::default(),
             recent_id: format!(
                 "{}-{:?}",
                 std::time::SystemTime::now()
@@ -189,6 +193,7 @@ impl Workspace {
             sidebar_layout: cx.new(|_| gpui_kit::component::resizable::ResizableState::default()),
             page: Page::Start,
             file_fullscreen: false,
+            file_fullscreen_entered_window: false,
             sidebar_selection: Some("start"),
             word_wrap: cx
                 .try_global::<crate::app::ReaderPreferences>()

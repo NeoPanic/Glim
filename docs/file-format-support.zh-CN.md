@@ -22,8 +22,9 @@
 | XMind | 新版 JSON / 旧版 XML 容器；工作表、附属与游离主题树、折叠、缩放与详情。支持纯文本备注、标签、HTTP(S) 链接和关系端点，只读 |
 | PNG/JPEG/WebP/GIF/BMP/TIFF/ICO/SVG/ICNS/EXR/HDR/QOI | 图片预览，GIF 动画、TIFF 多页、EXR/HDR 转 SDR；ICNS 需含 PNG 表示，SVG 不加载外部文件资源 |
 | PDF — macOS | 标签内嵌 PDFKit 预览，翻页、缩放、文字选择与密码输入 |
-| DOC/DOCX/PPT/PPTX/RTF — macOS | 标签内嵌 Quick Look 只读预览，可用性和排版取决于系统预览器 |
-| XLS/XLSX — macOS | XLSX 分页预览样式、合并及缓存值，并提供完整单元格数据；XLS 及不支持的结构使用 Quick Look。不重算公式；展示页不含图表、绘图及共享字符串分段富文本格式 |
+| DOC/DOCX/RTF — macOS | 单一自适应宽度只读预览，支持缩放，失败时自动回退 Quick Look。复杂排版、绘图、嵌入对象及页眉页脚可能有差异 |
+| PPT/PPTX — macOS | 标签内嵌 Quick Look 只读预览，可用性和排版取决于系统预览器 |
+| XLS/XLSX/XLSM — macOS | XLSX／XLSM 保留单一分页样式预览、合并及缓存值；XLS 及不支持的结构使用 Quick Look。不重算公式；展示页不含图表、绘图及共享字符串分段富文本格式 |
 | KEY/Pages/Numbers — macOS | Quick Look 只读预览，支持目录文档包，不提供编辑或演示动画 |
 | MP3/MP4/MKV/M4A/M4V/MOV/AAC/WAV/AIF/AIFF/CAF/FLAC — macOS | 标签内嵌 AVKit 播放、文件夹顺序／随机队列。H.264／AAC-LC 的 MKV 无损重新封装为临时 MP4，包含误标为 `.mp4` 的 Matroska。其他 MKV 编码和内嵌字幕暂不支持，其余媒体解码取决于系统支持 |
 | TTF/OTF/TTC/OTC/DFONT — macOS | CoreText 字体／集合查看、字形与自定义示例，不安装字体 |
@@ -88,3 +89,11 @@ MKV 支持 H.264／AAC-LC 重新封装，包括 AVC 配置及 Annex-B 帧；暂�
 电子书各项边界见统一配置清单。只加载本地书内资源，不请求远程图片或执行活动内容。暂不支持 DRM EPUB、MOBI/AZW、PDF 书籍版式、出版者 CSS 的完整还原及 EPUB 固定版式。Space／Page Down 与 Shift-Space／Page Up 按视口翻页，Left／Right 切换章节。阅读偏好与书签单独保存，不改写原书。
 
 XLSX 按页预览网格，避免系统提供者截断长工作表，另保留完整单元格索引。GPX/KML 坐标和图表批次提供继续浏览入口。复杂书籍、XMind、网格／字体投影及张量头保留完整源后备。原生图片可能采用缩放栅格，实际大小缩放不保证原分辨率解码。SQLite 完整值窗口不约束引擎内部表达式分配；ZIP 中央目录及 Quick Look/WebKit 仍受平台／库实现约束。非 Git 文件总量门槛改为流式、分页或完整源后备；Git/diff 边界留待专项迭代。
+
+演示文稿（PPT、PPTX、Keynote）在悬浮工具栏提供**播放幻灯片**，打开独立的全屏 Quick Look 演示，使用系统文档控件翻页，Esc 退出。翻页、转场、动画和内嵌媒体取决于系统文档提供器。本入口不导入 Google Slides 云端链接或 HTML 幻灯片框架。
+
+PDF 也提供**播放幻灯片**，使用 PDFKit 从当前页开始单页全屏展示。方向键、Page Up/Down、空格与 Shift+空格以及 Home/End 翻页；Esc 或悬浮栏“退出放映”返回最后展示的页。已解锁文档不需要重新输入密码。
+
+位图预览的悬浮工具栏提供**提取文字**。Apple Vision 在本机识别当前图片页，独立结果窗口支持选择复制及“复制全部”。识别使用当前解码预览，超大图片的小字可先切换“原尺寸”再提取。识别可能有误，结果为纯文本；SVG 预览暂不提供该功能。
+
+Office／iWork 和 PDF 工具栏提供**复制预览文字**和**识别图片文字**。Word、PDF 优先复制选中文字，否则复制已加载阅读内容／当前页。其他原生预览复制系统提供器当前公开的文字及单元格值，输出纯文本，表格格式依赖提供器。PDF OCR 识别当前页；OOXML／iWork 内嵌图片逐张识别常见位图，结果窗口提供“下一张图片”和“复制全部”。旧版二进制 Office 内嵌图片及矢量资源暂不支持此提取路径。Word、Excel 仅保留预览，不再展示“阅读／原始版式”或“预览／单元格数据”选择器。

@@ -2,15 +2,76 @@ import Cocoa
 import Quartz
 import SQLite3
 
+// A cancellable read-only query against Glim's complete cell-value index.
+private final class WorkbookCopyJob {
+    private let lock = NSLock()
+    private var database: OpaquePointer?
+    private var stopped = false
+    var cancelled: Bool { lock.lock(); defer { lock.unlock() }; return stopped }
+    func cancel() {
+        lock.lock(); stopped = true
+        if let database = database { sqlite3_interrupt(database) }
+        lock.unlock()
+    }
+    func read(path: String, sheet: WorkbookPreview.Sheet, row: Int, column: Int) throws -> String {
+        var connection: OpaquePointer?
+        guard sqlite3_open_v2(path, &connection, SQLITE_OPEN_READONLY | SQLITE_OPEN_PRIVATECACHE, nil) == SQLITE_OK, let connection = connection else {
+            if let connection = connection { sqlite3_close(connection) }; throw CocoaError(.fileReadUnknown)
+        }
+        lock.lock()
+        if stopped { lock.unlock(); sqlite3_close(connection); throw CocoaError(.userCancelled) }
+        database = connection; lock.unlock()
+        defer { lock.lock(); database = nil; sqlite3_close(connection); lock.unlock() }
+        sqlite3_busy_timeout(connection, Int32(ReaderLimits.SQLITE_BUSY_MILLISECONDS))
+        sqlite3_exec(connection, "PRAGMA query_only=ON; PRAGMA cache_size=-\(ReaderLimits.SQLITE_CACHE_KIB);", nil, nil, nil)
+        let table = "\(sheet.id): \(sheet.name)".replacingOccurrences(of: "\"", with: "\"\"")
+        // The internal columns are localized; position aliases keep this query
+        // independent of the UI language. Rows/columns match the preview page.
+        let sql = "WITH cells(address,value,formula) AS (SELECT * FROM \"\(table)\") SELECT address,value FROM cells WHERE CAST(ltrim(address,'ABCDEFGHIJKLMNOPQRSTUVWXYZ') AS INTEGER)>?1 AND CAST(ltrim(address,'ABCDEFGHIJKLMNOPQRSTUVWXYZ') AS INTEGER)<=?2"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(connection, sql, -1, &statement, nil) == SQLITE_OK, let statement = statement else { throw CocoaError(.fileReadUnknown) }
+        defer { sqlite3_finalize(statement) }
+        let lastRow = min(sheet.rows, row + ReaderLimits.SQLITE_PAGE_ROWS)
+        let lastColumn = min(sheet.columns, column + ReaderLimits.SQLITE_COLUMNS)
+        sqlite3_bind_int64(statement, 1, sqlite3_int64(row)); sqlite3_bind_int64(statement, 2, sqlite3_int64(lastRow))
+        var cells: [Int: [Int: String]] = [:]
+        func string(_ index: Int32) -> String {
+            guard let bytes = sqlite3_column_text(statement, index) else { return "" }
+            return String(decoding: UnsafeBufferPointer(start: bytes, count: Int(sqlite3_column_bytes(statement, index))), as: UTF8.self)
+        }
+        while true {
+            if cancelled { throw CocoaError(.userCancelled) }
+            let code = sqlite3_step(statement)
+            if code == SQLITE_DONE { break }
+            guard code == SQLITE_ROW else { throw CocoaError(.fileReadUnknown) }
+            let address = string(0)
+            var c = 0
+            for byte in address.utf8.prefix(while: { $0 >= 65 && $0 <= 90 }) { c = c * 26 + Int(byte - 64) }
+            guard c > column && c <= lastColumn,
+                  let r = Int(address.drop(while: { $0.isLetter })) else { continue }
+            cells[r, default: [:]][c] = string(1)
+        }
+        func quoted(_ value: String) -> String {
+            if value.contains("\t") || value.contains("\n") || value.contains("\r") || value.contains("\"") {
+                return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+            }
+            return value
+        }
+        guard lastRow > row, lastColumn > column else { return "" }
+        return ((row + 1)...lastRow).map { r in
+            ((column + 1)...lastColumn).map { c in quoted(cells[r]?[c] ?? "") }.joined(separator: "\t")
+        }.joined(separator: "\n")
+    }
+}
+
 // The provider receives a bounded presentation workbook for the selected window,
-// while the original complete cell index remains available through Cell data.
+// while the complete cell index remains an internal preparation resource.
 final class WorkbookPreview: NSObject {
     struct Sheet { let id: Int64; let name: String; let rows: Int; let columns: Int }
     let view = NSView()
     private let body = NSView()
     private let loading = NSTextField(labelWithString: L("Loading preview…"))
     private let picker = NSPopUpButton()
-    private let mode = NSSegmentedControl(labels: [L("Preview"), L("Cell data")], trackingMode: .selectOne, target: nil, action: nil)
     private let previous = NSButton(title: L("Previous"), target: nil, action: nil)
     private let next = NSButton(title: L("Next page"), target: nil, action: nil)
     private let previousColumns = NSButton(title: L("Previous columns"), target: nil, action: nil)
@@ -36,9 +97,8 @@ final class WorkbookPreview: NSObject {
     private var preview: QLPreviewView?
     private var previewDirectory: URL?
     private var previewKey: String?
-    private var data: SQLitePreview?
     private var previewToolbar: FloatingReaderToolbar!
-    private var dataMode = false
+    private var copyJob: WorkbookCopyJob?
 
     init(database: String, cache: String, helper: String, information: String, extraControls: @escaping () -> [NSView]) {
         self.database = database; self.cache = URL(fileURLWithPath: cache)
@@ -54,7 +114,6 @@ final class WorkbookPreview: NSObject {
             loading.centerXAnchor.constraint(equalTo: body.centerXAnchor), loading.centerYAnchor.constraint(equalTo: body.centerYAnchor),
             loading.widthAnchor.constraint(lessThanOrEqualTo: body.widthAnchor, constant: -48)
         ])
-        mode.selectedSegment = 0; mode.target = self; mode.action = #selector(changeMode(_:))
         picker.target = self; picker.action = #selector(selectSheet)
         previous.target = self; previous.action = #selector(previousPage)
         next.target = self; next.action = #selector(nextPage)
@@ -63,10 +122,13 @@ final class WorkbookPreview: NSObject {
         moreSheets.target = self; moreSheets.action = #selector(loadMoreSheets)
         status.font = .systemFont(ofSize: 12); status.textColor = .secondaryLabelColor
         loading.maximumNumberOfLines = 4; loading.lineBreakMode = .byTruncatingTail
-        let items = NSStackView()
-        [mode, picker, previous, next, previousColumns, nextColumns, moreSheets, status].forEach { items.addArrangedSubview($0) }
-        extraControls().forEach { items.addArrangedSubview($0) }
-        previewToolbar = FloatingReaderToolbar(items: items); previewToolbar.install(in: view)
+        let actions = ReaderControls([
+            ReaderControl("sheet", picker), ReaderControl("previous-rows", previous),
+            ReaderControl("next-rows", next), ReaderControl("previous-columns", previousColumns),
+            ReaderControl("next-columns", nextColumns), ReaderControl("more-sheets", moreSheets),
+            ReaderControl("range-status", status)
+        ] + extraControls().enumerated().map { ReaderControl("document-action-\($0.offset)", $0.element) })
+        previewToolbar = FloatingReaderToolbar(controls: actions); previewToolbar.install(in: view)
         controls()
         loadCatalog(offset: 0)
     }
@@ -157,7 +219,8 @@ final class WorkbookPreview: NSObject {
             .replacingOccurrences(of: "%last", with: String(min(sheet.columns, column + ReaderLimits.SQLITE_COLUMNS)))
     }
     private func loadPage() {
-        guard !closed, !dataMode, selected < sheets.count else { return }
+        cancelCopy()
+        guard !closed, selected < sheets.count else { return }
         preparation?.cancel(); preparation = nil; generation += 1
         let sheet = sheets[selected]
         let key = "\(sheet.id):\(row):\(column)"
@@ -178,14 +241,14 @@ final class WorkbookPreview: NSObject {
                 let output = folder.appendingPathComponent("page.xlsx")
                 try preparation.run(helper: helper, arguments: ["--prepare-spreadsheet-page", cache.path, String(sheet.id), String(row), String(column), output.path], destination: output)
                 DispatchQueue.main.async { [weak self] in
-                    guard let self = self, !self.closed, self.generation == generation, !self.dataMode else {
+                    guard let self = self, !self.closed, self.generation == generation else {
                         try? FileManager.default.removeItem(at: folder); return
                     }
                     self.preview?.previewItem = nil; self.preview?.close(); self.preview?.removeFromSuperview()
                     if let previous = self.previewDirectory { try? FileManager.default.removeItem(at: previous) }
                     self.previewDirectory = folder
                     guard let preview = QLPreviewView(frame: .zero, style: .normal) else {
-                        self.busy = false; self.loading.stringValue = L("Workbook preview is unavailable. Use Cell data to read the complete workbook."); self.controls(); return
+                        self.busy = false; self.loading.stringValue = L("Workbook preview is unavailable. Open with Another App."); self.controls(); return
                     }
                     preview.translatesAutoresizingMaskIntoConstraints = false
                     preview.autostarts = true; preview.shouldCloseWithWindow = false
@@ -206,59 +269,12 @@ final class WorkbookPreview: NSObject {
             } catch {
                 if let folder = directory { try? FileManager.default.removeItem(at: folder) }
                 DispatchQueue.main.async { [weak self] in
-                    guard let self = self, !self.closed, self.generation == generation, !self.dataMode else { return }
+                    guard let self = self, !self.closed, self.generation == generation else { return }
                     self.preparation = nil; self.busy = false
-                    self.loading.stringValue = L("Workbook preview is unavailable. Use Cell data to read the complete workbook.") + "\n" + String(error.localizedDescription.prefix(ReaderLimits.TEXT_LAYOUT_RUN_BYTES))
+                    self.loading.stringValue = L("Workbook preview is unavailable. Open with Another App.") + "\n" + String(error.localizedDescription.prefix(ReaderLimits.TEXT_LAYOUT_RUN_BYTES))
                     self.controls()
                 }
             }
-        }
-    }
-    @objc private func changeMode(_ sender: NSSegmentedControl) {
-        let showingData = sender.selectedSegment == 1
-        preparation?.cancel(); preparation = nil; generation += 1
-        dataMode = showingData; mode.selectedSegment = sender.selectedSegment
-        previewToolbar.isHidden = showingData; loading.isHidden = true; preview?.isHidden = true
-        if showingData {
-            if let data = data { data.close(); data.view.removeFromSuperview() }
-            let segment = NSSegmentedControl(labels: [L("Preview"), L("Cell data")], trackingMode: .selectOne, target: self, action: #selector(changeMode(_:)))
-            segment.selectedSegment = 1
-            let sheet = selected < sheets.count ? sheets[selected] : nil
-            let data = SQLitePreview(path: database, information: information, modeControl: segment, extraControls: extraControls(), worksheetCells: true, initialWorksheet: sheet.map { ($0.id, $0.name) })
-            data.view.translatesAutoresizingMaskIntoConstraints = false
-            body.addSubview(data.view)
-            NSLayoutConstraint.activate([
-                data.view.leadingAnchor.constraint(equalTo: body.leadingAnchor),
-                data.view.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-                data.view.topAnchor.constraint(equalTo: body.topAnchor),
-                data.view.bottomAnchor.constraint(equalTo: body.bottomAnchor)
-            ])
-            self.data = data; busy = false
-        } else {
-            data?.view.isHidden = true
-            if let worksheet = data?.currentWorksheet() {
-                if let index = sheets.firstIndex(where: { $0.id == worksheet.0 }) {
-                    if selected != index { selected = index; row = 0; column = 0; picker.selectItem(at: index) }
-                } else {
-                    busy = true; loading.isHidden = false; loading.stringValue = L("Loading preview…"); controls()
-                    let cache = cache, generation = generation
-                    queue.async { [weak self] in
-                        do {
-                            let found = try Self.querySheets(cache: cache, sql: "SELECT id,name,max_row,max_column FROM sheets WHERE id=\(worksheet.0)")
-                            DispatchQueue.main.async { [weak self] in
-                                guard let self = self, !self.closed, self.generation == generation, let sheet = found.first else { return }
-                                self.sheets.append(sheet); self.sheets.sort { $0.id < $1.id }
-                                self.picker.removeAllItems(); self.picker.addItems(withTitles: self.sheets.map { $0.name })
-                                self.selected = self.sheets.firstIndex(where: { $0.id == sheet.id }) ?? 0
-                                self.picker.selectItem(at: self.selected); self.row = 0; self.column = 0
-                                self.busy = false; self.loadPage()
-                            }
-                        } catch { DispatchQueue.main.async { [weak self] in self?.fail(error.localizedDescription) } }
-                    }
-                    return
-                }
-            }
-            busy = false; loadPage()
         }
     }
     private func fail(_ message: String) {
@@ -267,10 +283,34 @@ final class WorkbookPreview: NSObject {
             self.busy = false; self.loading.isHidden = false; self.loading.stringValue = message; self.controls()
         }
     }
+    func cancelCopy() { copyJob?.cancel(); copyJob = nil }
+    func copyText(_ completion: @escaping (String) -> Void) {
+        guard !closed, !busy, selected < sheets.count else { return }
+        cancelCopy()
+        let job = WorkbookCopyJob(); copyJob = job
+        let sheet = sheets[selected], row = row, column = column, database = database, generation = generation
+        queue.async { [weak self] in
+            do {
+                let text = try job.read(path: database, sheet: sheet, row: row, column: column)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, !self.closed, self.generation == generation, !job.cancelled else { return }
+                    self.copyJob = nil; completion(text)
+                }
+            } catch {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, !self.closed, self.generation == generation, !job.cancelled else { return }
+                    self.copyJob = nil
+                    if let window = self.view.window {
+                        let alert = NSAlert(); alert.messageText = L("Cannot copy worksheet cells."); alert.beginSheetModal(for: window)
+                    }
+                }
+            }
+        }
+    }
     func close() {
+        cancelCopy()
         closed = true; generation += 1; preparation?.cancel(); preparation = nil
         preview?.previewItem = nil; preview?.close(); preview = nil
-        data?.close(); data = nil
         if let directory = previewDirectory { try? FileManager.default.removeItem(at: directory) }; previewDirectory = nil
     }
 }

@@ -241,8 +241,41 @@ impl Workspace {
                 if let Some(diff) = &reader.diff {
                     label.push_str(&format!(" · {}", diff.scope.label()));
                 }
+                let hint_path = reader
+                    .commit_file
+                    .as_ref()
+                    .unwrap_or(&reader.path)
+                    .display()
+                    .to_string();
+                let hint_title = label.clone();
+                let hint_bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::default()));
+                let painted_hint_bounds = hint_bounds.clone();
                 h_flex()
                     .id(("document-tab", index))
+                    .relative()
+                    .child(
+                        canvas(
+                            move |bounds, _, _| {
+                                painted_hint_bounds.set(bounds);
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .inset_0(),
+                    )
+                    .on_hover(cx.listener(move |view, hovered: &bool, window, _| {
+                        if *hovered {
+                            view.path_hint.show(
+                                &hint_title,
+                                &hint_path,
+                                false,
+                                hint_bounds.get(),
+                                window,
+                            );
+                        } else {
+                            view.path_hint.hide_for(&hint_path, hint_bounds.get());
+                        }
+                    }))
                     .h(px(28.))
                     .flex_shrink_0()
                     .gap_2()

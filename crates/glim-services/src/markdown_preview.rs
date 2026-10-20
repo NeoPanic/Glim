@@ -378,42 +378,60 @@ pub fn collect(text: &str) -> Result<Vec<Diagram>> {
 pub fn render(
     text: &str,
     cancelled: &AtomicBool,
-    publish: impl FnMut(Diagram, std::result::Result<DiagramImage, String>),
+    mut publish: impl FnMut(Diagram, std::result::Result<DiagramImage, String>),
 ) -> Result<()> {
-    render_page(text, 0, cancelled, publish).map(|_| ())
+    let diagrams = collect(text)?;
+    for batch in diagrams.chunks(MAX_DIAGRAMS) {
+        if cancelled.load(Ordering::Relaxed) {
+            break;
+        }
+        render_batch(batch, cancelled, &mut publish)?;
+    }
+    Ok(())
 }
+
+/// Render one requested window without marking unrelated blocks as failures.
 pub fn render_page(
     text: &str,
     page: usize,
     cancelled: &AtomicBool,
-    mut publish: impl FnMut(Diagram, std::result::Result<DiagramImage, String>),
+    publish: impl FnMut(Diagram, std::result::Result<DiagramImage, String>),
 ) -> Result<usize> {
     let diagrams = collect(text)?;
-    let total = diagrams.len();
+    let first = page.saturating_mul(MAX_DIAGRAMS).min(diagrams.len());
+    let last = first.saturating_add(MAX_DIAGRAMS).min(diagrams.len());
+    render_batch(&diagrams[first..last], cancelled, publish)?;
+    Ok(diagrams.len())
+}
+
+/// Viewport-driven callers submit bounded batches of the blocks they actually need.
+pub fn render_batch(
+    diagrams: &[Diagram],
+    cancelled: &AtomicBool,
+    mut publish: impl FnMut(Diagram, std::result::Result<DiagramImage, String>),
+) -> Result<()> {
+    ensure!(
+        diagrams.len() <= MAX_DIAGRAMS,
+        "Active diagram batch exceeds working budget"
+    );
     let mut requests = Vec::new();
-    for (index, diagram) in diagrams.into_iter().enumerate() {
-        if index / MAX_DIAGRAMS != page {
-            publish(
-                diagram,
-                Err(crate::locale::tr(
-                    "Use the diagram page controls to render this block; its complete source remains available.",
-                )),
-            );
-            continue;
+    for diagram in diagrams {
+        if cancelled.load(Ordering::Relaxed) {
+            return Ok(());
         }
         if diagram.source.len() > MAX_SOURCE {
             publish(
-                diagram,
+                diagram.clone(),
                 Err(crate::locale::tr(
                     "Diagram source exceeds the active render budget; complete source is available in Source view.",
                 )),
             );
         } else {
-            requests.push(diagram);
+            requests.push(diagram.clone());
         }
     }
-    if requests.is_empty() || cancelled.load(Ordering::Relaxed) {
-        return Ok(total);
+    if requests.is_empty() {
+        return Ok(());
     }
     let per_image = (reader_limits::DIAGRAM_AGGREGATE_ENCODED_BYTES as u64)
         .min(reader_limits::DIAGRAM_AGGREGATE_DECODED_BYTES)
@@ -444,7 +462,7 @@ pub fn render_page(
         true
     });
     if requests.is_empty() || cancelled.load(Ordering::Relaxed) {
-        return Ok(total);
+        return Ok(());
     }
     let dir = tempfile::tempdir()?;
     let input = dir.path().join("request.json");
@@ -501,7 +519,7 @@ pub fn render_page(
         if cancelled.load(Ordering::Relaxed) {
             let _ = child.kill();
             let _ = child.wait();
-            return Ok(total);
+            return Ok(());
         }
         if started.elapsed() > deadline {
             timed_out = true;
@@ -584,7 +602,7 @@ pub fn render_page(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    Ok(total)
+    Ok(())
 }
 
 fn rasterize(

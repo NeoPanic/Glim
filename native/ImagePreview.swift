@@ -28,6 +28,7 @@ private final class CenteredImageClipView: NSClipView {
 
 // Pan in clip-view coordinates so dragging follows the pointer at any zoom.
 private final class PannableImageView: NSImageView {
+    override var acceptsFirstResponder: Bool { true }
     private var dragPoint: NSPoint?
     var allowsPan = false {
         didSet { window?.invalidateCursorRects(for: self) }
@@ -44,6 +45,7 @@ private final class PannableImageView: NSImageView {
         if canPan { addCursorRect(visibleRect, cursor: dragPoint == nil ? .openHand : .closedHand) }
     }
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         guard canPan, let clip = enclosingScrollView?.contentView else { super.mouseDown(with: event); return }
         dragPoint = clip.convert(event.locationInWindow, from: nil)
         NSCursor.closedHand.set()
@@ -86,6 +88,13 @@ final class ImagePreview: NSObject {
     let view: NSView = ImagePreviewHost()
     private let scroll = NSScrollView()
     private let imageView = PannableImageView()
+    private static let copyQueue = DispatchQueue(label: "glim.image.copy", qos: .userInitiated)
+    private var copyMonitor: Any?
+    private var copyTask: DispatchWorkItem?
+    private var copyGeneration = 0
+    private var liveText: AnyObject?
+    private let textExtraction = ImageTextExtraction()
+    private let extractTextButton = NSButton(title: L("Extract Text"), target: nil, action: nil)
     private let status = NSTextField(labelWithString: "")
     private let zoomLabel = NSTextField(labelWithString: "100.0%")
     private let zoomOutButton = NSButton(title: "−", target: nil, action: nil)
@@ -110,6 +119,8 @@ final class ImagePreview: NSObject {
     private var task: DispatchWorkItem?
     private var closed = false
     private var svgPreview: HTMLPreview?
+    private var svgCopyPreview: HTMLPreview?
+    private var contextMenuRouter: ReaderContextMenu?
     init(url: URL, sourceSize: NSSize? = nil) {
         self.url = url; self.sourceSize = sourceSize
         super.init()
@@ -141,6 +152,7 @@ final class ImagePreview: NSObject {
         scroll.allowsMagnification = true; scroll.minMagnification = 0.00001; scroll.maxMagnification = 8
         scroll.contentView = CenteredImageClipView()
         scroll.documentView = imageView
+        if #available(macOS 13.0, *) { liveText = MainActor.assumeIsolated { LiveImageText(imageView: imageView) } }
         NotificationCenter.default.addObserver(self, selector: #selector(liveMagnificationEnded(_:)), name: NSScrollView.didEndLiveMagnifyNotification, object: scroll)
         stack.addArrangedSubview(scroll)
         scroll.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -241,6 +253,33 @@ final class ImagePreview: NSObject {
         """
     }
     private func installToolbar() {
+        copyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            guard let self = self, !self.closed, !self.view.isHiddenOrHasHiddenAncestor,
+                  event.window === self.view.window else { return event }
+            if event.type == .keyDown {
+                guard event.charactersIgnoringModifiers?.lowercased() == "c",
+                      !event.modifierFlags.contains(.option), !event.modifierFlags.contains(.shift),
+                      event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control),
+                      let responder = event.window?.firstResponder as? NSView,
+                      responder === self.view || responder.isDescendant(of: self.view) else { return event }
+                if let editor = responder as? NSTextView, editor.isEditable { return event }
+                self.copySelectionOrImage()
+                return nil
+            }
+            return event
+        }
+        contextMenuRouter = ReaderContextMenu(host: view) { [weak self] _ in
+            guard let self = self, !self.closed else { return nil }
+            let menu = ReaderMenu.make()
+            let selectedText = self.hasSelectedImageText
+            if selectedText {
+                let text = NSMenuItem(title: L("Copy Text"), action: #selector(self.copySelectionOrImage), keyEquivalent: "c")
+                text.target = self; ReaderMenu.own(text); menu.addItem(text)
+            }
+            let image = NSMenuItem(title: L("Copy Image"), action: #selector(self.copyImage), keyEquivalent: selectedText ? "" : "c")
+            ReaderMenu.own(image); image.target = self; image.isEnabled = self.svgPreview != nil || self.imageView.image != nil; menu.addItem(image)
+            return menu
+        }
         let toolbar = NSStackView()
         zoomLabel.alignment = .center
         zoomLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
@@ -254,8 +293,95 @@ final class ImagePreview: NSObject {
         zoomInButton.target = self; zoomInButton.action = #selector(zoomIn)
         fitButton.target = self; fitButton.action = #selector(fitImage)
         resolution.target = self; resolution.action = #selector(actualSize)
-        [previous, next, zoomOutButton, zoomLabel, zoomInButton, fitButton, resolution, status].forEach { toolbar.addArrangedSubview($0) }
-        FloatingReaderToolbar(items: toolbar).install(in: view)
+        extractTextButton.target = self; extractTextButton.action = #selector(extractText)
+        extractTextButton.image = NSImage(systemSymbolName: "text.viewfinder", accessibilityDescription: L("Extract Text"))
+        extractTextButton.imagePosition = .imageLeading
+        extractTextButton.isHidden = svgPreview != nil
+        extractTextButton.isEnabled = false
+        [previous, next, zoomOutButton, zoomLabel, zoomInButton, fitButton, resolution, extractTextButton, status].forEach { toolbar.addArrangedSubview($0) }
+        FloatingReaderToolbar(items: toolbar).install(in: view, managesContextMenu: false)
+    }
+    private var hasSelectedImageText: Bool {
+        if #available(macOS 13.0, *) { return MainActor.assumeIsolated { (liveText as? LiveImageText)?.hasSelection ?? false } }
+        return false
+    }
+    @objc private func copySelectionOrImage() {
+        cancelImageCopy()
+        if #available(macOS 13.0, *), MainActor.assumeIsolated({ (liveText as? LiveImageText)?.copySelection() ?? false }) { return }
+        copyImage()
+    }
+    @objc private func copyImage() {
+        guard !closed else { return }
+        cancelImageCopy()
+        let generation = copyGeneration, changeCount = NSPasteboard.general.changeCount
+        if svgPreview != nil {
+            svgCopyPreview?.close()
+            let preview = HTMLPreview(document: url.appendingPathExtension("glim-preview.html"), contents: Self.svgDocument(url))
+            svgCopyPreview = preview
+            preview.view.frame = NSRect(origin: .zero, size: view.bounds.size)
+            preview.view.layoutSubtreeIfNeeded()
+            preview.didLoad = { [weak self, weak preview] in
+                guard let self = self, let preview = preview, !self.closed, self.copyGeneration == generation else { return }
+                preview.copyableImage { [weak self] image in
+                    guard let self = self, !self.closed, self.copyGeneration == generation,
+                          NSPasteboard.general.changeCount == changeCount else { return }
+                    self.svgCopyPreview?.close(); self.svgCopyPreview = nil
+                    guard let image = image,
+                          let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                        if let window = self.view.window {
+                            let alert = NSAlert(); alert.messageText = L("Cannot copy image."); alert.beginSheetModal(for: window)
+                        }
+                        return
+                    }
+                    self.writeImageCopy(raster: cgImage, generation: generation, changeCount: changeCount, svg: true)
+                }
+            }
+            return
+        }
+        let raster = imageView.image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        guard let raster = raster else { return }
+        writeImageCopy(raster: raster, generation: generation, changeCount: changeCount, svg: false)
+    }
+    private func writeImageCopy(raster: CGImage, generation: Int, changeCount: Int, svg: Bool) {
+        let singlePage = count == 1, url = url
+        let work = DispatchWorkItem { [weak self] in
+            let result: Data?
+            let type: NSPasteboard.PasteboardType
+            let svgData = svg ? try? Data(contentsOf: url, options: .mappedIfSafe) : nil
+            if !svg, singlePage,
+                      let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+                      let format = CGImageSourceGetType(source), ["public.png", "public.jpeg"].contains(format as String) {
+                result = try? Data(contentsOf: url, options: .mappedIfSafe)
+                type = NSPasteboard.PasteboardType(format as String)
+            } else {
+                let data = NSMutableData()
+                if let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) {
+                    CGImageDestinationAddImage(destination, raster, nil)
+                    result = CGImageDestinationFinalize(destination) ? (data as Data) : nil
+                } else { result = nil }
+                type = .png
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self, !self.closed, self.copyGeneration == generation,
+                      NSPasteboard.general.changeCount == changeCount else { return }
+                self.copyTask = nil
+                if let data = result {
+                    let item = NSPasteboardItem()
+                    item.setData(data, forType: type)
+                    if let svgData = svgData { item.setData(svgData, forType: NSPasteboard.PasteboardType("public.svg-image")) }
+                    NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects([item])
+                } else if let window = self.view.window {
+                    let alert = NSAlert(); alert.messageText = L("Cannot copy image."); alert.beginSheetModal(for: window)
+                }
+            }
+        }
+        copyTask = work; Self.copyQueue.async(execute: work)
+    }
+    private func cancelImageCopy() { copyGeneration += 1; copyTask?.cancel(); copyTask = nil; svgCopyPreview?.close(); svgCopyPreview = nil }
+    @objc private func extractText() {
+        guard let parent = view.window,
+              let image = imageView.image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        textExtraction.extract(image, in: parent)
     }
     private func svgAction(_ command: String) {
         svgPreview?.imageCommand(command) { [weak self] scale in
@@ -296,6 +422,7 @@ final class ImagePreview: NSObject {
     @objc private func previousPage() { if page > 0 { page -= 1; load() } }
     @objc private func nextPage() { if page + 1 < count { page += 1; load() } }
     private func controls(_ busy: Bool) {
+        extractTextButton.isEnabled = !busy && imageView.image != nil
         previous.isEnabled = !busy && page > 0; next.isEnabled = !busy && page + 1 < count
         resolution.isEnabled = !busy && imageView.image != nil
         previous.isHidden = count <= 1; next.isHidden = count <= 1
@@ -318,6 +445,9 @@ final class ImagePreview: NSObject {
         loading.isHidden = true; progress.stopAnimation(nil)
     }
     private func load() {
+        cancelImageCopy()
+        textExtraction.cancel()
+        if #available(macOS 13.0, *) { MainActor.assumeIsolated { (liveText as? LiveImageText)?.cancel() } }
         decodeToken?.cancel(); task?.cancel(); generation += 1
         let token = ImageDecodeToken(); decodeToken = token
         let generation = generation, page = page, original = original, url = url, sourceSize = sourceSize
@@ -353,6 +483,7 @@ final class ImagePreview: NSObject {
                 let size = sourceSize ?? NSSize(width: Double(image.width) * scale, height: Double(image.height) * scale)
                 self.imageView.image = NSImage(cgImage: image, size: size)
                 self.imageView.frame = NSRect(origin: .zero, size: size)
+                if #available(macOS 13.0, *) { (self.liveText as? LiveImageText)?.analyze(image) }
                 self.needsInitialFit = true
                 self.view.layoutSubtreeIfNeeded()
                 self.fitWhenReady()
@@ -362,7 +493,7 @@ final class ImagePreview: NSObject {
         }
         task = work; Self.decodeQueue.async(execute: work)
     }
-    func pause() { decodeToken?.cancel(); decodeToken = nil; task?.cancel(); task = nil; generation += 1; needsInitialFit = false; progress.stopAnimation(nil); imageView.image = nil }
+    func pause() { cancelImageCopy(); if #available(macOS 13.0, *) { MainActor.assumeIsolated { (liveText as? LiveImageText)?.cancel() } }; textExtraction.cancel(); extractTextButton.isEnabled = false; decodeToken?.cancel(); decodeToken = nil; task?.cancel(); task = nil; generation += 1; needsInitialFit = false; progress.stopAnimation(nil); imageView.image = nil }
     func resume() { if svgPreview != nil { return }; if !closed && task == nil && imageView.image == nil { load() } }
-    func close() { NotificationCenter.default.removeObserver(self); closed = true; pause(); svgPreview?.close(); svgPreview = nil }
+    func close() { contextMenuRouter = nil; if let monitor = copyMonitor { NSEvent.removeMonitor(monitor); copyMonitor = nil }; NotificationCenter.default.removeObserver(self); closed = true; pause(); svgPreview?.close(); svgPreview = nil }
 }

@@ -11,7 +11,6 @@ use gpui_kit::{
         ActiveTheme, FocusableExt, Icon,
         button::{Button, ButtonCustomVariant, ButtonVariants},
         menu::{PopupMenu, PopupMenuItem},
-        tooltip::Tooltip,
     },
     prelude::FluentBuilder,
     *,
@@ -72,6 +71,7 @@ pub struct Explorer {
     media_tasks: HashMap<PathBuf, Task<()>>,
     rows: Vec<Row>,
     clipped_labels: HashSet<(usize, PathBuf, bool)>,
+    path_hint: super::path_hint::PathHint,
     selected: Option<usize>,
     clicked_path: Option<PathBuf>,
     clicked_root: Option<usize>,
@@ -107,6 +107,7 @@ impl Explorer {
             media_tasks: HashMap::new(),
             rows: Vec::new(),
             clipped_labels: HashSet::new(),
+            path_hint: Default::default(),
             selected: None,
             clicked_path: None,
             clicked_root: None,
@@ -547,6 +548,9 @@ impl Explorer {
         let root_index = row.root_index;
         let label_key = (root_index, row.entry.path.clone(), sticky);
         let label_view = cx.entity().downgrade();
+        let hint_bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::default()));
+        let painted_hint_bounds = hint_bounds.clone();
+        let show_hint = self.clipped_labels.contains(&label_key);
         let tooltip_name = name.clone();
         let tooltip_path = row.entry.path.display().to_string();
         let row_path = row.entry.path.clone();
@@ -560,36 +564,32 @@ impl Explorer {
         let entry = div()
             .id(row.element_id(if sticky { "sticky-row" } else { "tree-row" }))
             .relative()
-            .when(self.clipped_labels.contains(&label_key), |entry| {
-                entry.tooltip(move |window, cx| {
-                    let name = tooltip_name.clone();
-                    let path = tooltip_path.clone();
-                    let width = (f32::from(window.viewport_size().width) - 48.).clamp(120., 480.);
-                    Tooltip::element(move |_, cx| {
-                        gpui_kit::component::v_flex()
-                            .w(px(width))
-                            .gap_1()
-                            .py_1()
-                            .child(
-                                div()
-                                    .whitespace_normal()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(name.clone()),
-                            )
-                            .child(
-                                div()
-                                    .whitespace_normal()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(path.clone()),
-                            )
-                    })
-                    .build(window, cx)
-                })
-            })
-            .on_hover(cx.listener(move |view, hovered: &bool, _, cx| {
-                if *hovered && menu_is_dir {
-                    view.check_folder_media(hover_path.clone(), cx);
+            .child(
+                canvas(
+                    move |bounds, _, _| {
+                        painted_hint_bounds.set(bounds);
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .on_hover(cx.listener(move |view, hovered: &bool, window, cx| {
+                if *hovered {
+                    if show_hint {
+                        view.path_hint.show(
+                            &tooltip_name,
+                            &tooltip_path,
+                            menu_is_dir,
+                            hint_bounds.get(),
+                            window,
+                        );
+                    }
+                    if menu_is_dir {
+                        view.check_folder_media(hover_path.clone(), cx);
+                    }
+                } else {
+                    view.path_hint.hide_for(&tooltip_path, hint_bounds.get());
                 }
             }))
             .on_mouse_down(

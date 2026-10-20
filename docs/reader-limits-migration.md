@@ -4,7 +4,7 @@
 
 ## 配置
 
-唯一入口为 [reader-limits.json](../assets/reader-limits.json)，当前 **33 类、181 项**。效果统计：70 项 unlimited、49 项 budget、33 项 fallback、11 项 page、8 项 timeout、7 项 truncate、3 项 reject。reject/truncate 仅保留在 Git/diff。统计不是实现验证证明。
+唯一入口为 [reader-limits.json](../assets/reader-limits.json)，当前 **34 类、184 项**。效果统计：70 项 unlimited、53 项 budget、33 项 fallback、10 项 page、8 项 timeout、7 项 truncate、3 项 reject。reject/truncate 仅保留在 Git/diff。统计不是实现验证证明。
 
 全部条目含中文行为说明；生成器生成[英文清单](reader-limits.md)及[中文清单](reader-limits.zh-CN.md)。修改策略后运行 `python3 scripts/generate-reader-limits.py --docs`。
 
@@ -14,7 +14,7 @@
 - 压缩流按需解码及滚动缓存，取消后重建解码器；容器目录、可执行文件、NumPy、safetensors 提供分页报告或完整源后备。
 - XLSX 流式建立磁盘 SQLite 单元格索引，保留全部工作表、坐标、缓存值和公式；XLS 使用 Quick Look，默认按行列页生成带样式、合并与缓存值的 Quick Look 展示副本，完整索引保留在单元格数据模式；不重算公式，不复制图表及绘图。分页使用现有 SQLite 行列策略与 IO 工作预算，不限制工作簿总行数或大小。
 - 电子书保留章节导航；复杂章节或包元数据提供完整文本／十六进制成员分页。资源按需解压，插图使用临时文件缩略图；标题摘要可查看全文。
-- GPX/KML 坐标分页；图表按活动页分批渲染，超出单次预算保留完整源内容。
+- GPX/KML 坐标分页；图表与公式按可见区域自动排队并分批渲染，缓存按工作预算淘汰，不要求用户手动切换图表页；超出单块结构化预算时保留完整源内容。
 - CSV 完整值和 SQLite 完整单元格／结构按窗口访问；大型文本对话框使用磁盘分页。
 - 图片串行可取消解码、QOI 流式采样、GIF 工作缓冲；保留原始逻辑尺寸及完整字节入口。音频封面提供完整资源入口。
 - 远程图片流式落盘；SVG 流式处理；XMind、OBJ/STL/BDF 复杂投影回退完整源分页。

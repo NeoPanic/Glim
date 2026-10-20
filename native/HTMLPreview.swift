@@ -171,6 +171,18 @@ final class HTMLPreview: NSObject, WKNavigationDelegate {
             completion((result as? NSNumber)?.doubleValue)
         }
     }
+    // Snapshot the rendered SVG image, excluding the viewer's controls and margins.
+    func copyableImage(completion: @escaping (NSImage?) -> Void) {
+        guard loaded else { completion(nil); return }
+        web.evaluateJavaScript("(()=>{const r=document.getElementById('image')?.getBoundingClientRect();return r ? [r.x,r.y,r.width,r.height] : null})()") { [weak self] value, _ in
+            guard let self = self, let values = value as? [Double], values.count == 4 else { completion(nil); return }
+            let rect = NSRect(x: values[0], y: values[1], width: values[2], height: values[3]).intersection(self.web.bounds)
+            guard !rect.isEmpty else { completion(nil); return }
+            let configuration = WKSnapshotConfiguration()
+            configuration.rect = rect
+            self.web.takeSnapshot(with: configuration) { image, _ in completion(image) }
+        }
+    }
     func close() {
         web.stopLoading(); web.navigationDelegate = nil
         resources.close(); web.removeFromSuperview()

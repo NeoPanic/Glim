@@ -37,10 +37,14 @@ fn build_native_preview() {
     for source in [
         "Preview.swift",
         "ImagePreview.swift",
+        "ImageTextExtraction.swift",
+        "PreviewCopy.swift",
         "FloatingReaderToolbar.swift",
+        "ReaderActions.swift",
         "HTMLPreview.swift",
         "SQLitePreview.swift",
         "WorkbookPreview.swift",
+        "WordPreview.swift",
         "EmbeddedPreview.swift",
     ] {
         println!("cargo:rerun-if-changed=../../native/{source}");
@@ -78,10 +82,14 @@ fn build_native_preview() {
             &format!("{arch}-apple-macos11.0"),
             "../../native/Preview.swift",
             "../../native/ImagePreview.swift",
+            "../../native/ImageTextExtraction.swift",
+            "../../native/PreviewCopy.swift",
             "../../native/FloatingReaderToolbar.swift",
+            "../../native/ReaderActions.swift",
             "../../native/HTMLPreview.swift",
             "../../native/SQLitePreview.swift",
             "../../native/WorkbookPreview.swift",
+            "../../native/WordPreview.swift",
             "../../native/EmbeddedPreview.swift",
         ])
         .arg(output.join("ReaderLimits.swift"))

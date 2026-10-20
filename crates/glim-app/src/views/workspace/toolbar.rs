@@ -1,7 +1,6 @@
+use super::reader_actions::{ToolbarAction, ToolbarItem, document_items};
 use super::{Page, Workspace};
-use crate::views::reader::Reader;
 use gpui_kit::{
-    assets::IconName,
     component::{
         ActiveTheme, Disableable, Icon, Selectable, Sizable,
         button::{Button, ButtonCustomVariant, ButtonVariants},
@@ -10,121 +9,25 @@ use gpui_kit::{
     *,
 };
 
-#[derive(Clone, Copy)]
-enum ToolbarAction {
-    Sidebar,
-    Back,
-    Forward,
-    Preview,
-    Source,
-    SideBySide,
-    Inline,
-    ViewFile,
-    WordWrap,
-    FileFullscreen,
-    Update,
-}
-
-struct ToolbarItem {
-    action: ToolbarAction,
-    label: &'static str,
-    icon: Option<IconName>,
-    selected: bool,
-    enabled: bool,
-}
-
-impl ToolbarAction {
-    fn id(self) -> &'static str {
-        match self {
-            Self::Sidebar => "toggle-sidebar",
-            Self::Back => "back",
-            Self::Forward => "forward",
-            Self::Preview => "reader-preview",
-            Self::Source => "reader-source",
-            Self::SideBySide => "diff-split",
-            Self::Inline => "diff-inline",
-            Self::ViewFile => "show-file",
-            Self::WordWrap => "word-wrap",
-            Self::FileFullscreen => "file-fullscreen",
-            Self::Update => "update-available",
-        }
-    }
-}
-
-impl ToolbarItem {
-    fn new(action: ToolbarAction) -> Self {
-        let (label, icon) = match action {
-            ToolbarAction::Sidebar => ("Toggle Sidebar", Some(IconName::PanelLeft)),
-            ToolbarAction::Back => ("Back", Some(IconName::ArrowLeft)),
-            ToolbarAction::Forward => ("Forward", Some(IconName::ArrowRight)),
-            ToolbarAction::Preview => ("Preview", Some(IconName::Eye)),
-            ToolbarAction::Source => ("Source", Some(IconName::Code)),
-            ToolbarAction::SideBySide => ("Side by side", Some(IconName::Columns2)),
-            ToolbarAction::Inline => ("Inline", Some(IconName::Rows2)),
-            ToolbarAction::ViewFile => ("View file", Some(IconName::FileText)),
-            ToolbarAction::WordWrap => ("Word wrap", None),
-            ToolbarAction::FileFullscreen => ("Enter File Fullscreen", None),
-            ToolbarAction::Update => ("Update Available", Some(IconName::Download)),
-        };
-        Self {
-            action,
-            label,
-            icon,
-            selected: false,
-            enabled: true,
-        }
-    }
-}
-
-/// Fixed order: viewing mode, related file action, then text layout.
-/// Capabilities come from the active reader, not a separate extension allowlist.
-fn document_items(reader: &Reader, word_wrap: bool) -> Vec<ToolbarItem> {
-    let mut items = Vec::new();
-    if reader.diff.is_some() || reader.historical {
-        let mut split = ToolbarItem::new(ToolbarAction::SideBySide);
-        split.selected = reader.side_by_side();
-        split.enabled = reader.split_available();
-        let mut inline = ToolbarItem::new(ToolbarAction::Inline);
-        inline.selected = !split.selected;
-        items.extend([split, inline]);
-        if reader.diff.is_some() {
-            items.push(ToolbarItem::new(ToolbarAction::ViewFile));
-        }
-    } else if reader.can_preview() {
-        let mut preview = ToolbarItem::new(ToolbarAction::Preview);
-        if reader.is_json() {
-            preview.label = "JSON tree";
-            preview.icon = Some(IconName::ListTree);
-        } else if reader.is_csv() {
-            preview.label = if reader
-                .path
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("tsv"))
-            {
-                "TSV table"
-            } else {
-                "CSV table"
-            };
-            preview.icon = Some(IconName::Rows2);
-        }
-        preview.selected = reader.toggle_label() == "Source";
-        let mut source = ToolbarItem::new(ToolbarAction::Source);
-        source.selected = !preview.selected;
-        items.extend([preview, source]);
-    }
-    if reader.can_word_wrap() {
-        let mut wrap = ToolbarItem::new(ToolbarAction::WordWrap);
-        wrap.selected = word_wrap;
-        wrap.enabled = !reader.can_preview() || reader.toggle_label() != "Source";
-        if !wrap.enabled {
-            wrap.label = "Word wrap · Source view";
-        }
-        items.push(wrap);
-    }
-    items
-}
-
 impl Workspace {
+    pub(super) fn set_file_fullscreen(&mut self, enabled: bool, window: &Window) {
+        if enabled == self.file_fullscreen {
+            return;
+        }
+        if enabled {
+            self.file_fullscreen_entered_window = !window.is_fullscreen();
+            if self.file_fullscreen_entered_window {
+                window.toggle_fullscreen();
+            }
+        } else {
+            if self.file_fullscreen_entered_window && window.is_fullscreen() {
+                window.toggle_fullscreen();
+            }
+            self.file_fullscreen_entered_window = false;
+        }
+        self.file_fullscreen = enabled;
+    }
+
     fn toolbar_button(&self, item: ToolbarItem, cx: &mut Context<Self>) -> Button {
         let action = item.action;
         let label = glim_services::locale::tr(item.label);
@@ -178,7 +81,7 @@ impl Workspace {
             .into_any_element()
     }
 
-    pub(super) fn workspace_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn reader_actions(&self) -> Vec<ToolbarItem> {
         let mut document = if self.page == Page::Document {
             self.active_reader()
                 .map(|r| document_items(r, self.word_wrap))
@@ -194,6 +97,11 @@ impl Workspace {
             }
             document.push(fullscreen);
         }
+        document
+    }
+
+    pub(super) fn workspace_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let document = self.reader_actions();
         let has_update = crate::app::updates::state(cx)
             .is_some_and(|state| state.read(cx).snapshot.has_update());
         let border = cx.theme().border;
@@ -217,7 +125,7 @@ impl Workspace {
         toolbar.into_any_element()
     }
 
-    fn run_toolbar_action(
+    pub(super) fn run_toolbar_action(
         &mut self,
         action: ToolbarAction,
         window: &mut Window,
@@ -256,7 +164,7 @@ impl Workspace {
             }
             ToolbarAction::FileFullscreen => {
                 if self.page == Page::Document && self.active_reader().is_some() {
-                    self.file_fullscreen = !self.file_fullscreen;
+                    self.set_file_fullscreen(!self.file_fullscreen, window);
                     self.results.clear();
                     self.search_task = None;
                     self.history_swipe = None;

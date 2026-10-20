@@ -240,11 +240,11 @@ This page is generated from the same policy. After editing it, run `python3 scri
 
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
-| `diagram.blocks` | 8 | items | page | Diagrams per active preview page. Previous/next controls expose the rest; switching pages releases the previous raster snapshot. |
-| `diagram.source_bytes` | 256 KiB | bytes | fallback | Per-diagram structured-render working budget; failures preserve the complete block source. Other diagram pages remain accessible. |
-| `diagram.svg_bytes` | 8 MiB | bytes | fallback | Per-diagram structured-render working budget; failures preserve the complete block source. Other diagram pages remain accessible. |
-| `diagram.aggregate_encoded_bytes` | 64 MiB | bytes | budget | Encoded/decoded images retained for one active diagram page. Switching pages releases the prior raster snapshot; this is not a document total gate. |
-| `diagram.aggregate_decoded_bytes` | 128 MiB | bytes | budget | Encoded/decoded images retained for one active diagram page. Switching pages releases the prior raster snapshot; this is not a document total gate. |
+| `diagram.blocks` | 8 | items | budget | Maximum diagrams per background render batch. Visible blocks queue automatically; this does not limit total document formulas or require manual paging. |
+| `diagram.source_bytes` | 256 KiB | bytes | fallback | Per-diagram structured-render working budget; failures preserve the complete block source. Other blocks remain available on demand. |
+| `diagram.svg_bytes` | 8 MiB | bytes | fallback | Per-diagram structured-render working budget; failures preserve the complete block source. Other blocks remain available on demand. |
+| `diagram.aggregate_encoded_bytes` | 64 MiB | bytes | budget | Encoded/decoded working budget for the viewport diagram cache and active render batch. Older resources are evicted and can be requested again; total document blocks remain unrestricted. |
+| `diagram.aggregate_decoded_bytes` | 128 MiB | bytes | budget | Encoded/decoded working budget for the viewport diagram cache and active render batch. Older resources are evicted and can be requested again; total document blocks remain unrestricted. |
 | `diagram.preview_edge` | 2,400 | pixels | budget | Active raster resolution/scale budget. Page raster dimensions also adapt to aggregate working memory, independently of document length. |
 | `diagram.startup_seconds` | 15 | seconds | timeout | Cancellable renderer startup/per-block time allowance; an unfinished block shows its complete source instead of rejecting the Markdown document. |
 | `diagram.block_seconds` | 8 | seconds | timeout | Cancellable renderer startup/per-block time allowance; an unfinished block shows its complete source instead of rejecting the Markdown document. |
@@ -253,7 +253,7 @@ This page is generated from the same policy. After editing it, run `python3 scri
 | `diagram.max_upscale` | 2 | scale | budget | Active raster resolution/scale budget. Page raster dimensions also adapt to aggregate working memory, independently of document length. |
 | `diagram.request_bytes` | 64 MiB | bytes | budget | One page/request or one block IPC working buffer; document batches are paged and oversized render results preserve the complete source block. |
 | `diagram.message_bytes` | 16388 KiB | bytes | budget | One page/request or one block IPC working buffer; document batches are paged and oversized render results preserve the complete source block. |
-| `diagram.mermaid_edges` | 1,000 | edges | fallback | Per-diagram structured-render working budget; failures preserve the complete block source. Other diagram pages remain accessible. |
+| `diagram.mermaid_edges` | 1,000 | edges | fallback | Per-diagram structured-render working budget; failures preserve the complete block source. Other blocks remain available on demand. |
 | `diagram.math_macros` | 1,000 | expansions | budget | Math interpreter expansion budget to bound recursive work; the complete formula source remains available when rendering cannot finish. |
 
 ## book
@@ -351,3 +351,11 @@ This page is generated from the same policy. After editing it, run `python3 scri
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
 | `svg.event_bytes` | 64 MiB | bytes | budget | One active XML markup/text record in the sanitizer, not a document total gate; native File bytes retains the complete source when preparation exceeds this budget. |
+
+## word
+
+| Key | Value | Unit | Effect | Behavior |
+| --- | ---: | --- | --- | --- |
+| `word.zoom_min_percent` | 25 | percent | budget | Minimum Word reading-view presentation zoom; does not constrain source content. |
+| `word.zoom_max_percent` | 400 | percent | budget | Maximum Word reading-view presentation zoom; does not constrain source content. |
+| `word.zoom_step_percent` | 25 | percent | budget | Zoom-in/out button increment in Word reading view; reset restores 100 percent. |

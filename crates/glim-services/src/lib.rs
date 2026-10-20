@@ -30,6 +30,7 @@ mod svg_preview;
 pub mod text_formats;
 pub mod vector_formats;
 pub mod watch;
+pub mod word_preview;
 pub mod work;
 pub mod workspace;
 pub mod xmind;

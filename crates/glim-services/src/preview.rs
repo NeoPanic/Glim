@@ -51,7 +51,17 @@ pub fn is_office(path: &Path) -> bool {
     path.extension().and_then(|s| s.to_str()).is_some_and(|s| {
         matches!(
             s.to_ascii_lowercase().as_str(),
-            "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "rtf" | "key" | "pages" | "numbers"
+            "doc"
+                | "docx"
+                | "xls"
+                | "xlsx"
+                | "xlsm"
+                | "ppt"
+                | "pptx"
+                | "rtf"
+                | "key"
+                | "pages"
+                | "numbers"
         )
     })
 }
@@ -128,6 +138,7 @@ pub struct PreparedPreview {
     // The native SQLite view must close before its private snapshot is removed.
     _sqlite: Option<crate::sqlite::Snapshot>,
     _spreadsheet: Option<crate::spreadsheet::Spreadsheet>,
+    _word_reading: Option<crate::word_preview::ReadingDocument>,
     _media_directory: Option<tempfile::TempDir>,
     _image: Option<tempfile::NamedTempFile>,
 }
@@ -189,13 +200,20 @@ pub fn prepare_cancellable(
     } else {
         None
     };
-    let spreadsheet = if !folder
-        && path
-            .extension()
-            .and_then(|s| s.to_str())
-            .is_some_and(|s| s.eq_ignore_ascii_case("xls") || s.eq_ignore_ascii_case("xlsx"))
-    {
+    let spreadsheet = if !folder && crate::spreadsheet::supports(path) {
         crate::spreadsheet::prepare(path, cancel)?
+    } else {
+        None
+    };
+    let word_reading = if !folder && crate::word_preview::supports(path) {
+        match crate::word_preview::prepare(path, cancel) {
+            Ok(reading) => Some(reading),
+            Err(error) => {
+                cancel.check()?;
+                log::warn!("Word reading view unavailable; retaining native layout: {error:#}");
+                None
+            }
+        }
     } else {
         None
     };
@@ -220,6 +238,11 @@ pub fn prepare_cancellable(
     let mut configuration = serde_json::json!({"files": files, "shuffle": shuffle, "autoplay": autoplay, "office": !folder && is_office(path), "font": !folder && is_font(path),
         "sqlite": spreadsheet.as_ref().map(|s| s.database.as_path()).or_else(|| sqlite.as_ref().and_then(|s| s.database.as_deref())).and_then(|p| p.to_str()),
         "sqliteInfo": spreadsheet.as_ref().map(|s| &s.information).or_else(|| sqlite.as_ref().map(|s| &s.information))});
+    configuration["wordReading"] = serde_json::json!(
+        word_reading
+            .as_ref()
+            .and_then(|reading| reading.html.to_str())
+    );
     configuration["fileBytes"] = serde_json::json!(!folder && !is_image(path) && !is_iwork(path));
     configuration["spreadsheetCache"] =
         serde_json::json!(spreadsheet.as_ref().and_then(|sheet| sheet.cache.to_str()));
@@ -253,6 +276,7 @@ pub fn prepare_cancellable(
         configuration: serde_json::to_vec(&configuration)?,
         _sqlite: sqlite,
         _spreadsheet: spreadsheet,
+        _word_reading: word_reading,
         _media_directory: media_directory,
         _image: image,
     })

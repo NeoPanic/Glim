@@ -43,10 +43,14 @@ fn main() {
     .expect("embed locale catalogs");
     println!("cargo:rerun-if-changed=../../native/Preview.swift");
     println!("cargo:rerun-if-changed=../../native/ImagePreview.swift");
+    println!("cargo:rerun-if-changed=../../native/ImageTextExtraction.swift");
+    println!("cargo:rerun-if-changed=../../native/PreviewCopy.swift");
     println!("cargo:rerun-if-changed=../../native/FloatingReaderToolbar.swift");
+    println!("cargo:rerun-if-changed=../../native/ReaderActions.swift");
     println!("cargo:rerun-if-changed=../../native/HTMLPreview.swift");
     println!("cargo:rerun-if-changed=../../native/SQLitePreview.swift");
     println!("cargo:rerun-if-changed=../../native/WorkbookPreview.swift");
+    println!("cargo:rerun-if-changed=../../native/WordPreview.swift");
     println!("cargo:rerun-if-changed=../../native/PreviewMain.swift");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;
@@ -82,9 +86,13 @@ fn main() {
             &format!("{arch}-apple-macos11.0"),
             "../../native/SQLitePreview.swift",
             "../../native/WorkbookPreview.swift",
+            "../../native/WordPreview.swift",
             "../../native/Preview.swift",
             "../../native/ImagePreview.swift",
+            "../../native/ImageTextExtraction.swift",
+            "../../native/PreviewCopy.swift",
             "../../native/FloatingReaderToolbar.swift",
+            "../../native/ReaderActions.swift",
             "../../native/HTMLPreview.swift",
         ])
         .arg(output.with_file_name("ReaderLimits.swift"))

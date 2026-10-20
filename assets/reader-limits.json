@@ -1011,41 +1011,41 @@
         "value": 8,
         "type": "usize",
         "unit": "items",
-        "effect": "page",
-        "description": "Diagrams per active preview page. Previous/next controls expose the rest; switching pages releases the previous raster snapshot.",
-        "description_zh": "当前预览页的图表数量；上一页／下一页可访问全部图表，切页释放上一页的图片快照。"
+        "effect": "budget",
+        "description": "Maximum diagrams per background render batch. Visible blocks queue automatically; this does not limit total document formulas or require manual paging.",
+        "description_zh": "后台每批图表渲染工作预算；可见图块自动排队，不限制文档公式总数，也无需手动翻页。"
       },
       "source_bytes": {
         "value": 262144,
         "type": "usize",
         "unit": "bytes",
         "effect": "fallback",
-        "description": "Per-diagram structured-render working budget; failures preserve the complete block source. Other diagram pages remain accessible.",
-        "description_zh": "单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图表页仍可访问。"
+        "description": "Per-diagram structured-render working budget; failures preserve the complete block source. Other blocks remain available on demand.",
+        "description_zh": "单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图块仍可按需访问。"
       },
       "svg_bytes": {
         "value": 8388608,
         "type": "usize",
         "unit": "bytes",
         "effect": "fallback",
-        "description": "Per-diagram structured-render working budget; failures preserve the complete block source. Other diagram pages remain accessible.",
-        "description_zh": "单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图表页仍可访问。"
+        "description": "Per-diagram structured-render working budget; failures preserve the complete block source. Other blocks remain available on demand.",
+        "description_zh": "单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图块仍可按需访问。"
       },
       "aggregate_encoded_bytes": {
         "value": 67108864,
         "type": "usize",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Encoded/decoded images retained for one active diagram page. Switching pages releases the prior raster snapshot; this is not a document total gate.",
-        "description_zh": "当前图表页保留的编码／解码图片预算；切页释放上一页图片快照，不限制文档图表总量。"
+        "description": "Encoded/decoded working budget for the viewport diagram cache and active render batch. Older resources are evicted and can be requested again; total document blocks remain unrestricted.",
+        "description_zh": "可视区域图表缓存与当前渲染批次的编码／解码工作预算；旧资源可淘汰后再次按需生成，不限制文档图块总数。"
       },
       "aggregate_decoded_bytes": {
         "value": 134217728,
         "type": "u64",
         "unit": "bytes",
         "effect": "budget",
-        "description": "Encoded/decoded images retained for one active diagram page. Switching pages releases the prior raster snapshot; this is not a document total gate.",
-        "description_zh": "当前图表页保留的编码／解码图片预算；切页释放上一页图片快照，不限制文档图表总量。"
+        "description": "Encoded/decoded working budget for the viewport diagram cache and active render batch. Older resources are evicted and can be requested again; total document blocks remain unrestricted.",
+        "description_zh": "可视区域图表缓存与当前渲染批次的编码／解码工作预算；旧资源可淘汰后再次按需生成，不限制文档图块总数。"
       },
       "preview_edge": {
         "value": 2400,
@@ -1116,8 +1116,8 @@
         "type": "usize",
         "unit": "edges",
         "effect": "fallback",
-        "description": "Per-diagram structured-render working budget; failures preserve the complete block source. Other diagram pages remain accessible.",
-        "description_zh": "单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图表页仍可访问。"
+        "description": "Per-diagram structured-render working budget; failures preserve the complete block source. Other blocks remain available on demand.",
+        "description_zh": "单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图块仍可按需访问。"
       },
       "math_macros": {
         "value": 1000,
@@ -1514,6 +1514,32 @@
         "effect": "budget",
         "description": "One active XML markup/text record in the sanitizer, not a document total gate; native File bytes retains the complete source when preparation exceeds this budget.",
         "description_zh": "清理器中单条活动 XML 标记／文本记录的工作预算，不是文档总量门槛；超出准备预算时，原生阅读器“文件字节”仍保留完整源文件。"
+      }
+    },
+    "word": {
+      "zoom_min_percent": {
+        "value": 25,
+        "type": "usize",
+        "unit": "percent",
+        "effect": "budget",
+        "description": "Minimum Word reading-view presentation zoom; does not constrain source content.",
+        "description_zh": "Word 阅读视图最小显示缩放，不约束源文件内容。"
+      },
+      "zoom_max_percent": {
+        "value": 400,
+        "type": "usize",
+        "unit": "percent",
+        "effect": "budget",
+        "description": "Maximum Word reading-view presentation zoom; does not constrain source content.",
+        "description_zh": "Word 阅读视图最大显示缩放，不约束源文件内容。"
+      },
+      "zoom_step_percent": {
+        "value": 25,
+        "type": "usize",
+        "unit": "percent",
+        "effect": "budget",
+        "description": "Zoom-in/out button increment in Word reading view; reset restores 100 percent.",
+        "description_zh": "Word 阅读视图缩放按钮的百分比步长；重置恢复 100%。"
       }
     }
   }

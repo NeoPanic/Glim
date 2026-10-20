@@ -3,3 +3,11 @@
 .DS_Store
 /scripts/markdown/node_modules/
 /scripts/**/__pycache__/
+
+# Local scratch databases and SQLite sidecars (keep nested fixtures trackable).
+/*.sqlite
+/*.sqlite3
+/*.db
+/*.sqlite-*
+/*.sqlite3-*
+/*.db-*

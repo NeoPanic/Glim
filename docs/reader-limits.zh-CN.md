@@ -240,11 +240,11 @@
 
 | Key | 当前值 | 单位 | 超限效果 | 实际行为 |
 | --- | ---: | --- | --- | --- |
-| `diagram.blocks` | 8 | items | 分页，可继续访问 | 当前预览页的图表数量；上一页／下一页可访问全部图表，切页释放上一页的图片快照。 |
-| `diagram.source_bytes` | 256 KiB | bytes | 降级处理 | 单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图表页仍可访问。 |
-| `diagram.svg_bytes` | 8 MiB | bytes | 降级处理 | 单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图表页仍可访问。 |
-| `diagram.aggregate_encoded_bytes` | 64 MiB | bytes | 处理／内存预算 | 当前图表页保留的编码／解码图片预算；切页释放上一页图片快照，不限制文档图表总量。 |
-| `diagram.aggregate_decoded_bytes` | 128 MiB | bytes | 处理／内存预算 | 当前图表页保留的编码／解码图片预算；切页释放上一页图片快照，不限制文档图表总量。 |
+| `diagram.blocks` | 8 | items | 处理／内存预算 | 后台每批图表渲染工作预算；可见图块自动排队，不限制文档公式总数，也无需手动翻页。 |
+| `diagram.source_bytes` | 256 KiB | bytes | 降级处理 | 单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图块仍可按需访问。 |
+| `diagram.svg_bytes` | 8 MiB | bytes | 降级处理 | 单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图块仍可按需访问。 |
+| `diagram.aggregate_encoded_bytes` | 64 MiB | bytes | 处理／内存预算 | 可视区域图表缓存与当前渲染批次的编码／解码工作预算；旧资源可淘汰后再次按需生成，不限制文档图块总数。 |
+| `diagram.aggregate_decoded_bytes` | 128 MiB | bytes | 处理／内存预算 | 可视区域图表缓存与当前渲染批次的编码／解码工作预算；旧资源可淘汰后再次按需生成，不限制文档图块总数。 |
 | `diagram.preview_edge` | 2,400 | pixels | 处理／内存预算 | 当前图片的分辨率／缩放预算；每页图片尺寸还按聚合工作内存调整，与文档总长度无关。 |
 | `diagram.startup_seconds` | 15 | seconds | 超时 | 可取消的渲染器启动／单块时间预算；未完成图块显示完整源码，不拒绝整个 Markdown 文档。 |
 | `diagram.block_seconds` | 8 | seconds | 超时 | 可取消的渲染器启动／单块时间预算；未完成图块显示完整源码，不拒绝整个 Markdown 文档。 |
@@ -253,7 +253,7 @@
 | `diagram.max_upscale` | 2 | scale | 处理／内存预算 | 当前图片的分辨率／缩放预算；每页图片尺寸还按聚合工作内存调整，与文档总长度无关。 |
 | `diagram.request_bytes` | 64 MiB | bytes | 处理／内存预算 | 一页请求或单图块的 IPC 工作缓冲预算；文档按页处理，过大的渲染结果保留完整图块源码。 |
 | `diagram.message_bytes` | 16388 KiB | bytes | 处理／内存预算 | 一页请求或单图块的 IPC 工作缓冲预算；文档按页处理，过大的渲染结果保留完整图块源码。 |
-| `diagram.mermaid_edges` | 1,000 | edges | 降级处理 | 单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图表页仍可访问。 |
+| `diagram.mermaid_edges` | 1,000 | edges | 降级处理 | 单个图表的结构化渲染工作预算；失败时保留完整图块源码，其余图块仍可按需访问。 |
 | `diagram.math_macros` | 1,000 | expansions | 处理／内存预算 | 公式解释器的展开工作预算，控制递归工作量；无法完成渲染时仍保留完整公式源码。 |
 
 ## book
@@ -351,3 +351,11 @@
 | Key | 当前值 | 单位 | 超限效果 | 实际行为 |
 | --- | ---: | --- | --- | --- |
 | `svg.event_bytes` | 64 MiB | bytes | 处理／内存预算 | 清理器中单条活动 XML 标记／文本记录的工作预算，不是文档总量门槛；超出准备预算时，原生阅读器“文件字节”仍保留完整源文件。 |
+
+## word
+
+| Key | 当前值 | 单位 | 超限效果 | 实际行为 |
+| --- | ---: | --- | --- | --- |
+| `word.zoom_min_percent` | 25 | percent | 处理／内存预算 | Word 阅读视图最小显示缩放，不约束源文件内容。 |
+| `word.zoom_max_percent` | 400 | percent | 处理／内存预算 | Word 阅读视图最大显示缩放，不约束源文件内容。 |
+| `word.zoom_step_percent` | 25 | percent | 处理／内存预算 | Word 阅读视图缩放按钮的百分比步长；重置恢复 100%。 |

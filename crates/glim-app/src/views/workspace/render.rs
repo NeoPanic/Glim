@@ -27,7 +27,7 @@ const GIT_NAVIGATION_VISIBLE: bool = false;
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.page != Page::Document || self.active_reader().is_none() {
-            self.file_fullscreen = false;
+            self.set_file_fullscreen(false, window);
         }
         if let Some(mode) = cx
             .try_global::<crate::app::ReaderPreferences>()
@@ -93,6 +93,40 @@ impl Render for Workspace {
                 None => welcome(self, cx.entity_id(), cx).into_any_element(),
             },
         };
+        // Preview actions use the same live capabilities and dispatcher as the
+        // toolbar. Text editors keep their selection-aware editing menu.
+        let content = if self.page == Page::Document
+            && self
+                .active_reader()
+                .is_some_and(|reader| reader.can_preview() && reader.toggle_label() == "Source")
+        {
+            let workspace = cx.entity().downgrade();
+            div()
+                .size_full()
+                .child(content)
+                .context_menu(move |mut menu, _, cx| {
+                    if let Some(workspace) = workspace.upgrade() {
+                        for item in workspace.read(cx).reader_actions() {
+                            let action = item.action;
+                            let workspace = workspace.downgrade();
+                            menu = menu.item(
+                                PopupMenuItem::new(glim_services::locale::tr(item.label))
+                                    .disabled(!item.enabled)
+                                    .checked(item.selected)
+                                    .on_click(move |_, window, cx| {
+                                        let _ = workspace.update(cx, |workspace, cx| {
+                                            workspace.run_toolbar_action(action, window, cx)
+                                        });
+                                    }),
+                            );
+                        }
+                    }
+                    menu
+                })
+                .into_any_element()
+        } else {
+            content
+        };
         let document_page = self.page == Page::Document;
         let gesture_view = cx.entity().downgrade();
         let viewer = v_flex()
@@ -100,7 +134,9 @@ impl Render for Workspace {
             .min_w_0()
             .overflow_hidden()
             .when(!self.file_fullscreen, |view| {
-                view.border_1().border_color(cx.theme().border)
+                view.rounded(px(10.))
+                    .border_1()
+                    .border_color(cx.theme().border)
             })
             .bg(cx.theme().background)
             .when(
@@ -435,10 +471,10 @@ impl Render for Workspace {
             .track_focus(&self.focus)
             .bg(cx.theme().sidebar)
             .text_color(cx.theme().foreground)
-            .child(header)
-            .capture_key_down(cx.listener(|view, event: &KeyDownEvent, _, cx| {
+            .when(!self.file_fullscreen, |view| view.child(header))
+            .capture_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
                 if view.file_fullscreen && event.keystroke.key == "escape" {
-                    view.file_fullscreen = false;
+                    view.set_file_fullscreen(false, window);
                     view.sidebar_window_width = 0.;
                     cx.stop_propagation();
                     cx.notify();

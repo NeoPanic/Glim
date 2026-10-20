@@ -1,4 +1,4 @@
-//! Stream XLSX cells into a disk-backed index; legacy XLS uses native Quick Look.
+//! Stream XLSX/XLSM cells into a disk-backed index; legacy XLS uses native Quick Look.
 //! Stored formula results are displayed without evaluating workbook code.
 mod pages;
 use crate::{limits, work::Cancellation};
@@ -11,6 +11,12 @@ use std::{
     io::BufReader,
     path::{Path, PathBuf},
 };
+
+pub fn supports(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "xls" | "xlsx" | "xlsm"))
+}
 
 pub struct Spreadsheet {
     pub database: PathBuf,
@@ -98,10 +104,9 @@ pub fn prepare(path: &Path, cancel: &Cancellation) -> Result<Option<Spreadsheet>
     }
 }
 fn prepare_index(path: &Path, cancel: &Cancellation) -> Result<Option<Spreadsheet>> {
-    if !path
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("xlsx"))
-    {
+    if !path.extension().is_some_and(|extension| {
+        extension.eq_ignore_ascii_case("xlsx") || extension.eq_ignore_ascii_case("xlsm")
+    }) {
         return Ok(None);
     }
     let before = std::fs::metadata(path)?;

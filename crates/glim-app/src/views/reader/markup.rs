@@ -80,11 +80,14 @@ impl MarkupReader {
             // Refresh the reader so its initial loading state cannot remain blank.
             cx.refresh_windows();
         });
-        let diagrams =
-            (!html).then(|| cx.new(|cx| DiagramPreview::new(preview_content.into(), cx)));
-        let diagram_subscription = diagrams
-            .as_ref()
-            .map(|diagrams| cx.observe(diagrams, |_, cx| cx.refresh_windows()));
+        let diagrams = (!html).then(|| cx.new(DiagramPreview::new));
+        let diagram_subscription = diagrams.as_ref().map(|diagrams| {
+            let state = state.downgrade();
+            cx.observe(diagrams, move |_, cx| {
+                let _ = state.update(cx, |state, cx| state.invalidate_inline_layout(cx));
+                cx.refresh_windows();
+            })
+        });
         let browser = html.then(|| {
             cx.new(|cx| {
                 super::native::NativeReader::html(
@@ -162,7 +165,7 @@ impl MarkupReader {
             pictures.load(text.clone(), self.html, cx)
         });
         if let Some(diagrams) = &self.diagrams {
-            diagrams.update(cx, |diagrams, cx| diagrams.load(text, cx));
+            diagrams.update(cx, |diagrams, cx| diagrams.reset(cx));
         }
     }
     pub fn reveal(&mut self, anchor: &str, cx: &mut App) {
@@ -183,6 +186,9 @@ impl MarkupReader {
         }
         self.pictures
             .update(cx, |pictures, cx| pictures.set_active(active, cx));
+        if let Some(diagrams) = &self.diagrams {
+            diagrams.update(cx, |diagrams, cx| diagrams.set_active(active, cx));
+        }
     }
     pub fn render(&mut self, open: OpenLink, cx: &mut App) -> AnyElement {
         self.set_images_active(self.preview, cx);
@@ -269,7 +275,7 @@ impl MarkupReader {
             // Keep document padding inside the viewport so the component's
             // absolute scrollbar stays at the reading area's outer edge.
             .px_6()
-            .py_4()
+            .py_0()
             .pr(px(136.));
         let text_view = if let Some(diagrams) = &self.diagrams {
             text_view.markdown_extensions(super::diagrams::with_alerts(
@@ -280,10 +286,6 @@ impl MarkupReader {
         } else {
             text_view
         };
-        let diagram_controls = self
-            .diagrams
-            .as_ref()
-            .and_then(|view| DiagramPreview::controls(view, cx));
         let body = div()
             .relative()
             .size_full()
@@ -366,9 +368,6 @@ impl MarkupReader {
             .min_h_0()
             .relative()
             .child(div().flex_1().min_h_0().w_full().child(body))
-            .when_some(diagram_controls, |view, controls| {
-                view.child(super::controls::floating("diagram-controls", controls, cx))
-            })
             .into_any_element()
     }
 }

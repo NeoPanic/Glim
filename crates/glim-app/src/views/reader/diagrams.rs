@@ -6,11 +6,7 @@ use gpui_kit::{
         InlineElement, InlineRenderContext, MarkdownExtensions, MarkdownNode, MarkdownParseContext,
         MarkdownPlugin, TextView, markdown_ast,
     },
-    component::{
-        ActiveTheme, Disableable,
-        button::{Button, ButtonVariants},
-        h_flex,
-    },
+    component::{ActiveTheme, h_flex},
     *,
 };
 use std::{
@@ -148,155 +144,251 @@ impl MarkdownPlugin for AlertPlugin {
             .into_any_element()
     }
 }
-type Snapshot = Arc<HashMap<Diagram, Preview>>;
+type Snapshot = Arc<Mutex<PreviewStore>>;
 static REVISION: AtomicU64 = AtomicU64::new(1);
-
-/// Keeps resources, cancellation and the extension registry alive across renders.
-pub(super) struct DiagramPreview {
-    pub extensions: MarkdownExtensions,
-    task: Option<Task<()>>,
-    cancelled: Arc<AtomicBool>,
-    text: String,
-    page: usize,
-    total: usize,
+struct PreviewEntry {
+    preview: Preview,
+    encoded: usize,
+    decoded: u64,
+    keys: usize,
+    used: u64,
 }
-impl DiagramPreview {
-    pub fn new(text: String, cx: &mut Context<Self>) -> Self {
-        let mut preview = Self {
-            extensions: extensions(Arc::new(HashMap::new())),
-            task: None,
-            cancelled: Arc::new(AtomicBool::new(false)),
-            text: String::new(),
-            page: 0,
-            total: 0,
-        };
-        preview.load(text, cx);
-        preview
+#[derive(Default)]
+struct PreviewStore {
+    entries: HashMap<Diagram, PreviewEntry>,
+    queue: std::collections::VecDeque<Diagram>,
+    pending: std::collections::HashSet<Diagram>,
+    pending_bytes: usize,
+    clock: u64,
+    revision: u64,
+    encoded: usize,
+    decoded: u64,
+    keys: usize,
+}
+impl PreviewStore {
+    fn request(&mut self, diagram: &Diagram) -> (Preview, bool) {
+        self.clock = self.clock.wrapping_add(1);
+        if let Some(entry) = self.entries.get_mut(diagram) {
+            entry.used = self.clock;
+            return (entry.preview.clone(), false);
+        }
+        let cost = diagram
+            .source
+            .len()
+            .saturating_add(diagram.kind.len())
+            .saturating_add(std::mem::size_of::<Diagram>())
+            .saturating_mul(2);
+        let mut queued = false;
+        if !self.pending.contains(diagram)
+            && self.pending_bytes.saturating_add(cost) as u64
+                <= glim_services::limits::IO_CACHE_BYTES
+        {
+            self.pending.insert(diagram.clone());
+            self.queue.push_back(diagram.clone());
+            self.pending_bytes += cost;
+            queued = true;
+        }
+        (Preview::Pending, queued)
     }
-    pub fn load(&mut self, text: String, cx: &mut Context<Self>) {
-        self.text = text;
-        self.page = 0;
-        self.total = 0;
-        self.load_page(cx);
+    fn batch(&mut self) -> Vec<Diagram> {
+        self.queue
+            .drain(..self.queue.len().min(markdown_preview::MAX_DIAGRAMS))
+            .collect()
     }
-    fn load_page(&mut self, cx: &mut Context<Self>) {
-        let text = self.text.clone();
-        let page = self.page;
-        self.cancelled.store(true, Ordering::Relaxed);
-        self.cancelled = Arc::new(AtomicBool::new(false));
-        self.extensions = extensions(Arc::new(HashMap::new()));
-        let cancelled = self.cancelled.clone();
-        let updates = Arc::new(Mutex::new(HashMap::new()));
-        let pending = updates.clone();
-        let done = Arc::new(AtomicBool::new(false));
-        let completed = done.clone();
-        let work = cx.background_executor().spawn(async move {
-            let publish = |diagram: Diagram,
-                           image: std::result::Result<markdown_preview::DiagramImage, String>| {
-                let preview = match image {
-                    Ok(image) => Preview::Image(
+    fn complete(
+        &mut self,
+        diagram: Diagram,
+        result: Result<markdown_preview::DiagramImage, String>,
+    ) {
+        if !self.pending.remove(&diagram) {
+            return;
+        }
+        let cost = diagram
+            .source
+            .len()
+            .saturating_add(diagram.kind.len())
+            .saturating_add(std::mem::size_of::<Diagram>())
+            .saturating_mul(2);
+        self.pending_bytes = self.pending_bytes.saturating_sub(cost);
+        let (preview, encoded, decoded, error_bytes) = match result {
+            Ok(image) => {
+                let encoded = image.png.len();
+                let decoded = u64::from(image.width) * u64::from(image.height) * 4;
+                (
+                    Preview::Image(
                         Arc::new(Image::from_bytes(ImageFormat::Png, image.png)),
                         image.width,
                         image.height,
                         image.baseline,
                     ),
-                    Err(error) => Preview::Error(error),
-                };
-                pending.lock().unwrap().insert(diagram, preview);
+                    encoded,
+                    decoded,
+                    0,
+                )
+            }
+            Err(error) => {
+                let bytes = error.len();
+                (Preview::Error(error), 0, 0, bytes)
+            }
+        };
+        let keys = diagram
+            .source
+            .len()
+            .saturating_add(diagram.kind.len())
+            .saturating_add(error_bytes)
+            .saturating_add(std::mem::size_of::<PreviewEntry>());
+        while self.encoded.saturating_add(encoded)
+            > glim_services::limits::DIAGRAM_AGGREGATE_ENCODED_BYTES
+            || self.decoded.saturating_add(decoded)
+                > glim_services::limits::DIAGRAM_AGGREGATE_DECODED_BYTES
+            || self.keys.saturating_add(keys) as u64 > glim_services::limits::IO_CACHE_BYTES
+        {
+            let Some(oldest) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
             };
-            let result = markdown_preview::render_page(&text, page, &cancelled, publish);
-            completed.store(true, Ordering::Release);
-            (result, text)
-        });
-        self.task = Some(cx.spawn(async move |view, cx| {
-            let mut snapshot = HashMap::new();
-            while !done.load(Ordering::Acquire) {
-                let batch = std::mem::take(&mut *updates.lock().unwrap());
-                if !batch.is_empty() {
-                    snapshot.extend(batch);
-                    if view
-                        .update(cx, |view, cx| {
-                            view.extensions = extensions(Arc::new(snapshot.clone()));
-                            cx.notify();
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(100))
-                    .await;
-            }
-            let (result, text) = work.await;
-            snapshot.extend(std::mem::take(&mut *updates.lock().unwrap()));
-            let total = result.as_ref().copied().unwrap_or(0);
-            if let Err(error) = result {
-                for diagram in markdown_preview::collect(&text).unwrap_or_default() {
-                    snapshot
-                        .entry(diagram)
-                        .or_insert_with(|| Preview::Error(format!("离线图表无法渲染：{error}")));
-                }
-            }
-            let _ = view.update(cx, |view, cx| {
-                // An empty discovery result changes no diagram nodes. Keeping
-                // the parser revision avoids reparsing a diagram-free document.
-                if !snapshot.is_empty() {
-                    view.extensions = extensions(Arc::new(snapshot));
-                }
-                view.task = None;
-                view.total = total;
-                cx.notify();
-            });
-        }));
+            let old = self.entries.remove(&oldest).unwrap();
+            self.encoded -= old.encoded;
+            self.decoded -= old.decoded;
+            self.keys -= old.keys;
+        }
+        self.clock = self.clock.wrapping_add(1);
+        self.revision = self.revision.wrapping_add(1);
+        self.encoded += encoded;
+        self.decoded += decoded;
+        self.keys += keys;
+        self.entries.insert(
+            diagram,
+            PreviewEntry {
+                preview,
+                encoded,
+                decoded,
+                keys,
+                used: self.clock,
+            },
+        );
+    }
+}
+
+/// Parser nodes retain identities; visible blocks request mutable render resources.
+pub(super) struct DiagramPreview {
+    pub extensions: MarkdownExtensions,
+    snapshot: Snapshot,
+    task: Option<Task<()>>,
+    cancelled: Arc<AtomicBool>,
+    active: bool,
+}
+impl DiagramPreview {
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let snapshot = Arc::new(Mutex::new(PreviewStore::default()));
+        Self {
+            extensions: extensions(snapshot.clone(), cx.entity().downgrade()),
+            snapshot,
+            task: None,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            active: false,
+        }
+    }
+    pub fn reset(&mut self, cx: &mut Context<Self>) {
+        self.cancelled.store(true, Ordering::Relaxed);
+        self.task = None;
+        self.snapshot = Arc::new(Mutex::new(PreviewStore::default()));
+        self.extensions = extensions(self.snapshot.clone(), cx.entity().downgrade());
+        if self.active {
+            self.start(cx);
+        }
         cx.notify();
     }
-    pub fn controls(view: &Entity<Self>, cx: &mut App) -> Option<AnyElement> {
-        let current = view.read(cx);
-        let pages = current.total.div_ceil(markdown_preview::MAX_DIAGRAMS);
-        if pages <= 1 {
-            return None;
+    pub fn set_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        if self.active == active {
+            return;
         }
-        let page = current.page;
-        let busy = current.task.is_some();
-        let previous = view.clone();
-        let next = view.clone();
-        Some(
-            h_flex()
-                .p_2()
-                .gap_2()
-                .text_xs()
-                .child(
-                    glim_services::locale::tr("Diagram page %page / %pages")
-                        .replace("%page", &(page + 1).to_string())
-                        .replace("%pages", &pages.to_string()),
-                )
-                .child(
-                    Button::new("diagram-previous")
-                        .ghost()
-                        .label(glim_services::locale::tr("Previous"))
-                        .disabled(busy || page == 0)
-                        .on_click(move |_, _, cx| {
-                            previous.update(cx, |v, cx| {
-                                v.page = v.page.saturating_sub(1);
-                                v.load_page(cx);
-                            })
-                        }),
-                )
-                .child(
-                    Button::new("diagram-next")
-                        .ghost()
-                        .label(glim_services::locale::tr("Next page"))
-                        .disabled(busy || page + 1 >= pages)
-                        .on_click(move |_, _, cx| {
-                            next.update(cx, |v, cx| {
-                                v.page += 1;
-                                v.load_page(cx);
-                            })
-                        }),
-                )
-                .into_any_element(),
-        )
+        self.active = active;
+        if active {
+            self.ensure_work(cx);
+        } else {
+            self.cancelled.store(true, Ordering::Relaxed);
+            self.task = None;
+            let mut snapshot = self.snapshot.lock().unwrap();
+            snapshot.pending.clear();
+            snapshot.queue.clear();
+            snapshot.pending_bytes = 0;
+            snapshot.entries.clear();
+            snapshot.encoded = 0;
+            snapshot.decoded = 0;
+            snapshot.keys = 0;
+        }
+    }
+    fn ensure_work(&mut self, cx: &mut Context<Self>) {
+        if self.active && self.task.is_none() && !self.snapshot.lock().unwrap().queue.is_empty() {
+            self.start(cx);
+        }
+    }
+    fn start(&mut self, cx: &mut Context<Self>) {
+        self.cancelled = Arc::new(AtomicBool::new(false));
+        let cancelled = self.cancelled.clone();
+        let snapshot = self.snapshot.clone();
+        self.task = Some(cx.spawn(async move |view, cx| {
+            while !cancelled.load(Ordering::Relaxed) {
+                let batch = snapshot.lock().unwrap().batch();
+                if batch.is_empty() {
+                    let _ = view.update(cx, |view, cx| {
+                        view.task = None;
+                        view.ensure_work(cx);
+                    });
+                    return;
+                }
+                let before = snapshot.lock().unwrap().revision;
+                let results = snapshot.clone();
+                let cancel = cancelled.clone();
+                let done = Arc::new(AtomicBool::new(false));
+                let finished = done.clone();
+                let work = cx.background_executor().spawn(async move {
+                    let result =
+                        markdown_preview::render_batch(&batch, &cancel, |diagram, image| {
+                            if !cancel.load(Ordering::Relaxed) {
+                                results.lock().unwrap().complete(diagram, image);
+                            }
+                        });
+                    if let Err(error) = result {
+                        for diagram in batch {
+                            if cancel.load(Ordering::Relaxed) {
+                                break;
+                            }
+                            results
+                                .lock()
+                                .unwrap()
+                                .complete(diagram, Err(format!("{error:#}")));
+                        }
+                    }
+                    finished.store(true, Ordering::Release);
+                });
+                let mut revision = before;
+                while !done.load(Ordering::Acquire) {
+                    if cancelled.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let current = snapshot.lock().unwrap().revision;
+                    if current != revision {
+                        revision = current;
+                        if view.update(cx, |_, cx| cx.notify()).is_err() {
+                            return;
+                        }
+                    }
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(100))
+                        .await;
+                }
+                work.await;
+                if view.update(cx, |_, cx| cx.notify()).is_err() {
+                    return;
+                }
+            }
+        }));
     }
 }
 impl Drop for DiagramPreview {
@@ -305,27 +397,41 @@ impl Drop for DiagramPreview {
     }
 }
 
-fn extensions(snapshot: Snapshot) -> MarkdownExtensions {
+fn extensions(snapshot: Snapshot, owner: WeakEntity<DiagramPreview>) -> MarkdownExtensions {
     MarkdownExtensions::default()
         .frontmatter()
         .parser_revision(REVISION.fetch_add(1, Ordering::Relaxed))
         .plugin(DiagramPlugin {
             snapshot: snapshot.clone(),
+            owner: owner.clone(),
             block: true,
         })
         .plugin(DiagramPlugin {
             snapshot,
+            owner,
             block: false,
         })
 }
 struct DiagramPlugin {
     snapshot: Snapshot,
+    owner: WeakEntity<DiagramPreview>,
     block: bool,
 }
 struct DiagramNode {
-    preview: Preview,
-    source: String,
+    diagram: Diagram,
     inline: bool,
+}
+impl DiagramPlugin {
+    fn preview(&self, diagram: &Diagram, cx: &mut App) -> Preview {
+        let (preview, queued) = self.snapshot.lock().unwrap().request(diagram);
+        if queued {
+            let owner = self.owner.clone();
+            cx.defer(move |cx| {
+                let _ = owner.update(cx, |view, cx| view.ensure_work(cx));
+            });
+        }
+        preview
+    }
 }
 impl MarkdownPlugin for DiagramPlugin {
     fn name(&self) -> &str {
@@ -349,17 +455,11 @@ impl MarkdownPlugin for DiagramPlugin {
         }
         let diagram = markdown_preview::from_node_with_source(node, cx.node_source(node))?;
         let source = cx.node_source(node).unwrap_or(&diagram.source).to_owned();
-        let preview = self
-            .snapshot
-            .get(&diagram)
-            .cloned()
-            .unwrap_or(Preview::Pending);
         Some(
             MarkdownNode::new(
                 self.name().to_owned(),
                 DiagramNode {
-                    preview,
-                    source: diagram.source.clone(),
+                    diagram: diagram.clone(),
                     inline,
                 },
             )
@@ -371,7 +471,8 @@ impl MarkdownPlugin for DiagramPlugin {
         let Some(data) = node.data::<DiagramNode>() else {
             return div().into_any_element();
         };
-        match &data.preview {
+        let preview = self.preview(&data.diagram, cx);
+        match &preview {
             Preview::Image(image, width, height, _) => {
                 if data.inline {
                     img(image.clone())
@@ -397,12 +498,17 @@ impl MarkdownPlugin for DiagramPlugin {
                         .into_any_element()
                 }
             }
+            Preview::Error(_) if data.inline => div()
+                .text_color(cx.theme().muted_foreground)
+                .child(data.diagram.source.clone())
+                .into_any_element(),
             Preview::Error(error) => {
                 let mut end = data
+                    .diagram
                     .source
                     .len()
                     .min(glim_services::limits::TEXT_LAYOUT_RUN_BYTES);
-                while !data.source.is_char_boundary(end) {
+                while !data.diagram.source.is_char_boundary(end) {
                     end -= 1;
                 }
                 div()
@@ -411,8 +517,8 @@ impl MarkdownPlugin for DiagramPlugin {
                     .bg(cx.theme().muted)
                     .text_color(cx.theme().muted_foreground)
                     .child(div().text_sm().child(error.clone()))
-                    .child(div().mt_2().child(data.source[..end].to_owned()))
-                    .when(end < data.source.len(), |view| {
+                    .child(div().mt_2().child(data.diagram.source[..end].to_owned()))
+                    .when(end < data.diagram.source.len(), |view| {
                         view.child(glim_services::locale::tr(
                             "Complete source is available in Source view.",
                         ))
@@ -421,7 +527,7 @@ impl MarkdownPlugin for DiagramPlugin {
             }
             Preview::Pending if data.inline => div()
                 .text_color(cx.theme().muted_foreground)
-                .child(data.source.clone())
+                .child(data.diagram.source.clone())
                 .into_any_element(),
             Preview::Pending => div()
                 .py_2()
@@ -450,7 +556,8 @@ impl MarkdownPlugin for DiagramPlugin {
         cx: &mut App,
     ) -> Option<InlineElement> {
         let data = node.data::<DiagramNode>()?;
-        if let Preview::Image(image, width, height, baseline) = &data.preview {
+        let preview = self.preview(&data.diagram, cx);
+        if let Preview::Image(image, width, height, baseline) = &preview {
             let scale = context.font_size() / px(16.0);
             Some(
                 InlineElement::new(
