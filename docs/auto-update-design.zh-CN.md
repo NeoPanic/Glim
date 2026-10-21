@@ -25,8 +25,8 @@ macOS 发行构建使用 **GitHub Releases + Sparkle 2.10.0 + Glim 共用更新�
 每个架构有稳定的签名 feed：
 
 ```text
-https://github.com/NeoPanic/Glim/releases/latest/download/appcast-macos-arm64.xml
-https://github.com/NeoPanic/Glim/releases/latest/download/appcast-macos-x86_64.xml
+https://github.com/glimapp/glim/releases/latest/download/appcast-macos-arm64.xml
+https://github.com/glimapp/glim/releases/latest/download/appcast-macos-x86_64.xml
 ```
 
 安装条目指向具体 tag 的 `Glim-<version>-macos-<arch>.dmg`，不使用可变 latest 安装包。显示版本是 `CFBundleShortVersionString`，Sparkle 排序使用严格递增的 `CFBundleVersion`。保留 `io.github.jony4.glimpse` 身份；客户端不需要 GitHub Token 或 Releases API 查询。

@@ -473,7 +473,7 @@ impl UnavailableReader {
             .filter(|s| !s.is_empty())
             .or_else(|| path.file_name().and_then(|s| s.to_str()))
             .unwrap_or("unknown");
-        let mut url = url::Url::parse("https://github.com/NeoPanic/Glim/issues/new").unwrap();
+        let mut url = url::Url::parse("https://github.com/glimapp/glim/issues/new").unwrap();
         url.query_pairs_mut().append_pair("title", &format!("Unsupported file format: {extension}"))
             .append_pair("body", &format!("Format: {extension}\nGlim: {}\nPlatform: {} / {}\n\nWhat happened:\nCould not display this file.\n\nExpected behavior:\n\nAdditional details (optional):\n", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH));
         Self {

@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix='glim-dmg-') as directory:
         'A focused file viewer for macOS.\n\n'
         'This release is ad-hoc signed, without Developer ID signing or notarization.\n'
         'macOS Gatekeeper may require explicit approval in System Settings > Privacy & Security.\n\n'
-        'Source and issues: https://github.com/NeoPanic/Glim\n', encoding='utf-8')
+        'Source and issues: https://github.com/glimapp/glim\n', encoding='utf-8')
     # Bound the image size explicitly. Automatic APFS image sizing can fail
     # with ENOSPC on hosted runners even when the host volume has ample space.
     payload_bytes = sum(p.stat().st_size for p in stage.rglob('*') if p.is_file() and not p.is_symlink())

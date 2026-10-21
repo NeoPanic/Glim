@@ -25,8 +25,8 @@ The UI shows version, release notes, status/progress, reminders, skip/cancel act
 Each architecture has a stable signed feed:
 
 ```text
-https://github.com/NeoPanic/Glim/releases/latest/download/appcast-macos-arm64.xml
-https://github.com/NeoPanic/Glim/releases/latest/download/appcast-macos-x86_64.xml
+https://github.com/glimapp/glim/releases/latest/download/appcast-macos-arm64.xml
+https://github.com/glimapp/glim/releases/latest/download/appcast-macos-x86_64.xml
 ```
 
 Enclosures point to a specific tag's `Glim-<version>-macos-<arch>.dmg`, not a mutable latest installer. Display versions use `CFBundleShortVersionString`; Sparkle ordering uses strictly increasing `CFBundleVersion`. The bundle identifier remains `io.github.jony4.glimpse`. Clients need no GitHub token or GitHub Releases API query.

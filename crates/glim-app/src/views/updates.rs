@@ -118,7 +118,7 @@ impl Render for Updates {
             .child(h_flex().w_full().justify_end().gap_2().pt_2()
                 .when(snapshot.enabled && !snapshot.can_download && !snapshot.can_install && !working, |v| v.child(Button::new("update-check").primary().h(px(32.)).flex_shrink_0().rounded(px(8.)).label(tr("Check for Updates…"))
                     .on_click(|_, _, cx| updates::command("check", cx))))
-                .when(!snapshot.enabled, |v| v.child(Button::new("update-download-manual").primary().h(px(32.)).flex_shrink_0().rounded(px(8.)).label(tr("Download Latest Version")).on_click(|_, _, cx| cx.open_url("https://github.com/NeoPanic/Glim/releases/latest"))))
+                .when(!snapshot.enabled, |v| v.child(Button::new("update-download-manual").primary().h(px(32.)).flex_shrink_0().rounded(px(8.)).label(tr("Download Latest Version")).on_click(|_, _, cx| cx.open_url("https://github.com/glimapp/glim/releases/latest"))))
                 .when(snapshot.can_download, |v| v.child(Button::new("update-download").primary().h(px(32.)).flex_shrink_0().rounded(px(8.)).label(tr("Download Update")).disabled(busy)
                     .on_click(|_, _, cx| updates::command("download", cx))))
                 .when(snapshot.can_install, |v| v
@@ -156,7 +156,7 @@ impl Render for Updates {
                 .when_some(backup, |v, path| v.child(Button::new("update-backup").ghost().small().h(px(32.)).flex_shrink_0().rounded(px(8.)).label(tr("Show Recovery Backup"))
                     .on_click(move |_, _, cx| cx.reveal_path(&path))))
                 .child(div().flex_1())
-                .when(snapshot.enabled, |v| v.child(Button::new("update-releases").ghost().small().h(px(32.)).flex_shrink_0().rounded(px(8.)).label(tr("GitHub Releases")).on_click(|_, _, cx| cx.open_url("https://github.com/NeoPanic/Glim/releases/latest"))))
+                .when(snapshot.enabled, |v| v.child(Button::new("update-releases").ghost().small().h(px(32.)).flex_shrink_0().rounded(px(8.)).label(tr("GitHub Releases")).on_click(|_, _, cx| cx.open_url("https://github.com/glimapp/glim/releases/latest"))))
             ))
             )
     }

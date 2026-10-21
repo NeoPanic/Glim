@@ -142,7 +142,7 @@ def chart(history, dark=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repository", default="NeoPanic/Glim")
+    parser.add_argument("--repository", default="glimapp/glim")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository):

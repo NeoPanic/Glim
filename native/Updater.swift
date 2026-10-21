@@ -113,7 +113,7 @@ final class GlimUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate {
         return identity == "io.github.jony4.glimpse"
     }
     static func validFeed(_ url: String) -> Bool {
-        let feeds = ["arm64", "x86_64"].map { "https://github.com/NeoPanic/Glim/releases/latest/download/appcast-macos-\($0).xml" }
+        let feeds = ["arm64", "x86_64"].map { "https://github.com/glimapp/glim/releases/latest/download/appcast-macos-\($0).xml" }
         #if GLIM_UPDATER_TESTING
         if let value = URL(string: url), value.host == "127.0.0.1", value.scheme == "http" { return true }
         #endif

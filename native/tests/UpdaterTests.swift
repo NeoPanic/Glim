@@ -11,7 +11,7 @@ struct UpdaterTests {
         precondition(!updater.started)
         precondition(!GlimUpdater.validFeed("https://evil.invalid/appcast.xml"))
         precondition(!GlimUpdater.validFeed("https://github.com/another/repo/releases/latest/download/appcast.xml"))
-        precondition(GlimUpdater.validFeed("https://github.com/NeoPanic/Glim/releases/latest/download/appcast-macos-arm64.xml"))
+        precondition(GlimUpdater.validFeed("https://github.com/glimapp/glim/releases/latest/download/appcast-macos-arm64.xml"))
         updater.configured = true
         var replies: [SPUUserUpdateChoice] = []
         updater.showReady(toInstallAndRelaunch: { replies.append($0) })

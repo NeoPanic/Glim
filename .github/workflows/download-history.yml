@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   update:
-    if: github.repository == 'NeoPanic/Glim'
+    if: github.repository == 'glimapp/glim'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

@@ -4,10 +4,10 @@ Thanks for helping make more files readable. English and Chinese are both welcom
 
 ## Bugs, formats, and ideas
 
-- Search [existing issues](https://github.com/NeoPanic/Glim/issues) before opening a new one.
+- Search [existing issues](https://github.com/glimapp/glim/issues) before opening a new one.
 - For a bug, include the Glim version, OS/architecture, steps, and expected versus actual behavior. Attach a small, sanitized example if the file format matters.
 - For a format request, describe the information you want to see and a representative public or synthetic file. Never upload private documents, credentials, or proprietary model weights.
-- Use [Discussions](https://github.com/NeoPanic/Glim/discussions) for questions and early ideas. See [SECURITY.md](SECURITY.md) for vulnerabilities.
+- Use [Discussions](https://github.com/glimapp/glim/discussions) for questions and early ideas. See [SECURITY.md](SECURITY.md) for vulnerabilities.
 
 ## Code changes
 

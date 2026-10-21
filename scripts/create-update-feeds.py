@@ -14,7 +14,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 SPARKLE = '{http://www.andymatuschak.org/xml-namespaces/sparkle}'
-REPOSITORY = 'https://github.com/NeoPanic/Glim'
+REPOSITORY = 'https://github.com/glimapp/glim'
 
 
 def run(*args):

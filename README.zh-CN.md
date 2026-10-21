@@ -6,17 +6,17 @@ Glim 是免费开源的 Mac 全能文件内容查看器。Markdown、PDF、图�
 
 <p align="center">免费开源 · macOS · Apple Silicon 与 Intel · <a href="README.md">English</a> / <b>简体中文</b></p>
 
-<p align="center"><a href="https://github.com/NeoPanic/Glim/releases/latest"><strong>下载 Glim →</strong></a></p>
+<p align="center"><a href="https://glimapp.github.io/">Website / 官网</a> · <a href="https://github.com/glimapp/glim/releases/latest"><strong>下载 Glim →</strong></a></p>
 
-<p align="center"><a href="https://github.com/NeoPanic/Glim/releases/latest">最新发布 · 更新说明与校验文件</a> · <a href="#下载与安装">安装帮助</a></p>
+<p align="center"><a href="https://github.com/glimapp/glim/releases/latest">最新发布 · 更新说明与校验文件</a> · <a href="#下载与安装">安装帮助</a></p>
 
 <p align="center"><sub>Mac 下载包目前尚未经过 Apple 公证，首次打开可能需要在系统设置中放行。<a href="#macos">查看步骤</a></sub></p>
 
 <p align="center">
-  <a href="https://github.com/NeoPanic/Glim/releases"><img src="https://img.shields.io/github/downloads/NeoPanic/Glim/total?style=flat-square&amp;color=268879&amp;label=%E6%80%BB%E4%B8%8B%E8%BD%BD%E9%87%8F" alt="发布附件总下载量" /></a>
-  <a href="https://github.com/NeoPanic/Glim/actions/workflows/ci.yml"><img src="https://github.com/NeoPanic/Glim/actions/workflows/ci.yml/badge.svg" alt="桌面版构建状态" /></a>
+  <a href="https://github.com/glimapp/glim/releases"><img src="https://img.shields.io/github/downloads/glimapp/glim/total?style=flat-square&amp;color=268879&amp;label=%E6%80%BB%E4%B8%8B%E8%BD%BD%E9%87%8F" alt="发布附件总下载量" /></a>
+  <a href="https://github.com/glimapp/glim/actions/workflows/ci.yml"><img src="https://github.com/glimapp/glim/actions/workflows/ci.yml/badge.svg" alt="桌面版构建状态" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT 许可证" /></a>
-  <a href="https://github.com/NeoPanic/Glim/stargazers"><img src="https://img.shields.io/github/stars/NeoPanic/Glim?style=social" alt="GitHub Star 数量" /></a>
+  <a href="https://github.com/glimapp/glim/stargazers"><img src="https://img.shields.io/github/stars/glimapp/glim?style=social" alt="GitHub Star 数量" /></a>
 </p>
 
 ## 文档、数据和代码，一个工作空间
@@ -25,7 +25,7 @@ Glim 是免费开源的 Mac 全能文件内容查看器。Markdown、PDF、图�
 
 紧凑界面将文档标签与可调整宽度的文件侧栏放在一起，工作空间搜索位于标题栏，预览与源码切换按钮随手可用。截图展示的是公开的 [12-factor-agents](https://github.com/humanlayer/12-factor-agents) 文档；其中的正文与插图属于该项目。
 
-[下载 Glim](https://github.com/NeoPanic/Glim/releases/latest) · [投票：下一步加什么格式](https://github.com/NeoPanic/Glim/discussions/28) · [提出格式需求](https://github.com/NeoPanic/Glim/issues/new?template=feature_request.yml)
+[下载 Glim](https://github.com/glimapp/glim/releases/latest) · [投票：下一步加什么格式](https://github.com/glimapp/glim/discussions/28) · [提出格式需求](https://github.com/glimapp/glim/issues/new?template=feature_request.yml)
 
 | 想查看什么 | Glim 提供什么 |
 | --- | --- |
@@ -76,7 +76,7 @@ Office 排版和音视频编码支持取决于 macOS。XLS/XLSX 显示本地表�
 
 ## 下载与安装
 
-在[最新 Release 页面](https://github.com/NeoPanic/Glim/releases/latest)的 **Assets** 中，按设备选择对应安装包；版本号、更新说明和校验文件以该页面为准。
+在[最新 Release 页面](https://github.com/glimapp/glim/releases/latest)的 **Assets** 中，按设备选择对应安装包；版本号、更新说明和校验文件以该页面为准。
 
 | 你的设备 | 安装包文件名后缀 |
 | --- | --- |
@@ -89,11 +89,11 @@ Office 排版和音视频编码支持取决于 macOS。XLS/XLSX 显示本地表�
 
 打开 DMG，将 Glim 拖入“应用程序”。目前使用 ad-hoc 签名，尚无 Developer ID 签名与 Apple 公证。若系统拦截，先尝试打开一次，再到 **系统设置 → 隐私与安全性 → 仍要打开**。请确认安装包来自本项目发布页，无需关闭系统安全保护。[Apple 官方说明](https://support.apple.com/zh-cn/102445)
 
-[更新说明与 SHA-256 校验文件](https://github.com/NeoPanic/Glim/releases/latest) · [历史版本](https://github.com/NeoPanic/Glim/releases) · [从源码构建](docs/releasing.zh-CN.md)
+[更新说明与 SHA-256 校验文件](https://github.com/glimapp/glim/releases/latest) · [历史版本](https://github.com/glimapp/glim/releases) · [从源码构建](docs/releasing.zh-CN.md)
 
 ## 参与项目
 
-[报告问题](https://github.com/NeoPanic/Glim/issues/new?template=bug_report.yml) · [申请格式或功能](https://github.com/NeoPanic/Glim/issues/new?template=feature_request.yml) · [讨论与交流](https://github.com/NeoPanic/Glim/discussions)，欢迎中文和英文。
+[报告问题](https://github.com/glimapp/glim/issues/new?template=bug_report.yml) · [申请格式或功能](https://github.com/glimapp/glim/issues/new?template=feature_request.yml) · [讨论与交流](https://github.com/glimapp/glim/discussions)，欢迎中文和英文。
 
 [贡献指南](CONTRIBUTING.md#中文说明) · [构建说明](docs/releasing.zh-CN.md) · [未完成计划](docs/TODO.zh-CN.md) · [安全政策（英文）](SECURITY.md) · [MIT License](LICENSE)
 
@@ -101,27 +101,27 @@ Office 排版和音视频编码支持取决于 macOS。XLS/XLSX 显示本地表�
 
 感谢每一位帮助 Glim 变得更好的贡献者。
 
-<a href="https://github.com/NeoPanic/Glim/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=NeoPanic/Glim" alt="Glim 贡献者头像墙" />
+<a href="https://github.com/glimapp/glim/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=glimapp/glim" alt="Glim 贡献者头像墙" />
 </a>
 
 ## Star 增长曲线
 
-<a href="https://star-history.com/#NeoPanic/Glim&amp;Date">
+<a href="https://star-history.com/#glimapp/glim&amp;Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=NeoPanic/Glim&amp;type=Date&amp;theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=NeoPanic/Glim&amp;type=Date" />
-    <img src="https://api.star-history.com/svg?repos=NeoPanic/Glim&amp;type=Date" alt="Glim 在 GitHub 上的 Star 增长曲线" width="100%" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=glimapp/glim&amp;type=Date&amp;theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=glimapp/glim&amp;type=Date" />
+    <img src="https://api.star-history.com/svg?repos=glimapp/glim&amp;type=Date" alt="Glim 在 GitHub 上的 Star 增长曲线" width="100%" />
   </picture>
 </a>
 
 ## 下载量增长曲线
 
-<a href="https://github.com/NeoPanic/Glim/tree/codex/download-stats">
+<a href="https://github.com/glimapp/glim/tree/codex/download-stats">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NeoPanic/Glim/refs/heads/codex/download-stats/downloads-dark.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/NeoPanic/Glim/refs/heads/codex/download-stats/downloads.svg" />
-    <img src="https://raw.githubusercontent.com/NeoPanic/Glim/refs/heads/codex/download-stats/downloads.svg" alt="Glim 发布附件累计下载量曲线" width="100%" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/glimapp/glim/refs/heads/codex/download-stats/downloads-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/glimapp/glim/refs/heads/codex/download-stats/downloads.svg" />
+    <img src="https://raw.githubusercontent.com/glimapp/glim/refs/heads/codex/download-stats/downloads.svg" alt="Glim 发布附件累计下载量曲线" width="100%" />
   </picture>
 </a>
 

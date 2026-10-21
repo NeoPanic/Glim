@@ -33,7 +33,7 @@ if enabled:
     minimums.append('11.0')
     info.update({
         'LSMinimumSystemVersion': max(minimums, key=lambda v: tuple(map(int, v.split('.')))),
-        'SUFeedURL': f'https://github.com/NeoPanic/Glim/releases/latest/download/appcast-macos-{arch}.xml',
+        'SUFeedURL': f'https://github.com/glimapp/glim/releases/latest/download/appcast-macos-{arch}.xml',
         'SUPublicEDKey': public,
         'SUEnableAutomaticChecks': True,
         'SUScheduledCheckInterval': 86400,

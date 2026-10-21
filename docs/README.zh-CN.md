@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文** · [Glim 首页](../README.zh-CN.md)
 
-当前仅维护 macOS（Apple Silicon 与 Intel），后续发版只提供这两个架构的安装包和更新源。仓库只包含 Mac 平台实现，既有公开附件继续保留在[历史 Release](https://github.com/NeoPanic/Glim/releases)。
+当前仅维护 macOS（Apple Silicon 与 Intel），后续发版只提供这两个架构的安装包和更新源。仓库只包含 Mac 平台实现，既有公开附件继续保留在[历史 Release](https://github.com/glimapp/glim/releases)。
 
 | 主题 | 内容 |
 | --- | --- |
@@ -12,4 +12,4 @@
 | [应用更新](auto-update-design.zh-CN.md) | 当前更新行为、信任、工作保护与恢复 |
 | [路线图](TODO.zh-CN.md) | 未实现能力与剩余验收 |
 
-每个主题都有对应英文页面，顶部可切换语言。英文导航保持英文，中文导航保持中文。文档描述当前仓库实现，具体已发布版本的行为以[更新说明](https://github.com/NeoPanic/Glim/releases)为准。
+每个主题都有对应英文页面，顶部可切换语言。英文导航保持英文，中文导航保持中文。文档描述当前仓库实现，具体已发布版本的行为以[更新说明](https://github.com/glimapp/glim/releases)为准。

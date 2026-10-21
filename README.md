@@ -6,17 +6,17 @@ Glim is a free, open-source, all-purpose file viewer for Mac. Read Markdown, PDF
 
 <p align="center">Free and open source · macOS · Apple Silicon &amp; Intel · <b>English</b> / <a href="README.zh-CN.md">简体中文</a></p>
 
-<p align="center"><a href="https://github.com/NeoPanic/Glim/releases/latest"><strong>Download Glim →</strong></a></p>
+<p align="center"><a href="https://glimapp.github.io/">Website / 官网</a> · <a href="https://github.com/glimapp/glim/releases/latest"><strong>Download Glim →</strong></a></p>
 
-<p align="center"><a href="https://github.com/NeoPanic/Glim/releases/latest">Latest release · Release notes &amp; checksums</a> · <a href="#download">Installation help</a></p>
+<p align="center"><a href="https://github.com/glimapp/glim/releases/latest">Latest release · Release notes &amp; checksums</a> · <a href="#download">Installation help</a></p>
 
 <p align="center"><sub>Mac downloads are not yet notarized by Apple. You may need to approve the first launch in System Settings. <a href="#macos">See instructions</a></sub></p>
 
 <p align="center">
-  <a href="https://github.com/NeoPanic/Glim/releases"><img src="https://img.shields.io/github/downloads/NeoPanic/Glim/total?style=flat-square&amp;color=268879" alt="Total release downloads" /></a>
-  <a href="https://github.com/NeoPanic/Glim/actions/workflows/ci.yml"><img src="https://github.com/NeoPanic/Glim/actions/workflows/ci.yml/badge.svg" alt="Desktop builds" /></a>
+  <a href="https://github.com/glimapp/glim/releases"><img src="https://img.shields.io/github/downloads/glimapp/glim/total?style=flat-square&amp;color=268879" alt="Total release downloads" /></a>
+  <a href="https://github.com/glimapp/glim/actions/workflows/ci.yml"><img src="https://github.com/glimapp/glim/actions/workflows/ci.yml/badge.svg" alt="Desktop builds" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License" /></a>
-  <a href="https://github.com/NeoPanic/Glim/stargazers"><img src="https://img.shields.io/github/stars/NeoPanic/Glim?style=social" alt="GitHub stars" /></a>
+  <a href="https://github.com/glimapp/glim/stargazers"><img src="https://img.shields.io/github/stars/glimapp/glim?style=social" alt="GitHub stars" /></a>
 </p>
 
 ## Documents, data and code in one workspace
@@ -25,7 +25,7 @@ Glim is a free, open-source, all-purpose file viewer for Mac. Read Markdown, PDF
 
 The compact interface puts document tabs beside a resizable file sidebar, with workspace search in the title bar. Preview and source controls stay close at hand. The screenshot shows the public [12-factor-agents](https://github.com/humanlayer/12-factor-agents) documentation; its text and illustration belong to that project.
 
-[Download Glim](https://github.com/NeoPanic/Glim/releases/latest) · [Vote for the next format](https://github.com/NeoPanic/Glim/discussions/28) · [Request a file format](https://github.com/NeoPanic/Glim/issues/new?template=feature_request.yml)
+[Download Glim](https://github.com/glimapp/glim/releases/latest) · [Vote for the next format](https://github.com/glimapp/glim/discussions/28) · [Request a file format](https://github.com/glimapp/glim/issues/new?template=feature_request.yml)
 
 | Looking for… | What Glim offers |
 | --- | --- |
@@ -76,7 +76,7 @@ Office layout and media codecs depend on macOS support. XLS/XLSX previews show l
 
 ## Download
 
-Open the [latest Release page](https://github.com/NeoPanic/Glim/releases/latest) and choose the matching installer under **Assets**. That page contains the current version, release notes and checksums.
+Open the [latest Release page](https://github.com/glimapp/glim/releases/latest) and choose the matching installer under **Assets**. That page contains the current version, release notes and checksums.
 
 | Your device | Installer filename suffix |
 | --- | --- |
@@ -89,11 +89,11 @@ Not sure which Mac download to choose? Open **Apple menu → About This Mac**. A
 
 Open the DMG and drag Glim into Applications. The app is ad-hoc signed, without Developer ID signing or notarization. If macOS blocks it, try opening it once, then go to **System Settings → Privacy & Security → Open Anyway**. Confirm the download came from this project's releases; there is no need to disable system security. [Apple's instructions](https://support.apple.com/en-us/102445).
 
-[Release notes & SHA-256 checksums](https://github.com/NeoPanic/Glim/releases/latest) · [All releases](https://github.com/NeoPanic/Glim/releases) · [Build from source](docs/releasing.md)
+[Release notes & SHA-256 checksums](https://github.com/glimapp/glim/releases/latest) · [All releases](https://github.com/glimapp/glim/releases) · [Build from source](docs/releasing.md)
 
 ## Get involved
 
-Found a file Glim should open better? [Report a bug](https://github.com/NeoPanic/Glim/issues/new?template=bug_report.yml), [request a format](https://github.com/NeoPanic/Glim/issues/new?template=feature_request.yml), or [start a discussion](https://github.com/NeoPanic/Glim/discussions). English and Chinese are welcome.
+Found a file Glim should open better? [Report a bug](https://github.com/glimapp/glim/issues/new?template=bug_report.yml), [request a format](https://github.com/glimapp/glim/issues/new?template=feature_request.yml), or [start a discussion](https://github.com/glimapp/glim/discussions). English and Chinese are welcome.
 
 [Contributing](CONTRIBUTING.md) · [Build from source](docs/releasing.md) · [Roadmap](docs/TODO.md) · [Security](SECURITY.md) · [MIT License](LICENSE)
 
@@ -101,27 +101,27 @@ Found a file Glim should open better? [Report a bug](https://github.com/NeoPanic
 
 Thanks to everyone helping make Glim better.
 
-<a href="https://github.com/NeoPanic/Glim/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=NeoPanic/Glim" alt="Glim contributors" />
+<a href="https://github.com/glimapp/glim/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=glimapp/glim" alt="Glim contributors" />
 </a>
 
 ## Star history
 
-<a href="https://star-history.com/#NeoPanic/Glim&amp;Date">
+<a href="https://star-history.com/#glimapp/glim&amp;Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=NeoPanic/Glim&amp;type=Date&amp;theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=NeoPanic/Glim&amp;type=Date" />
-    <img src="https://api.star-history.com/svg?repos=NeoPanic/Glim&amp;type=Date" alt="Glim GitHub star history" width="100%" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=glimapp/glim&amp;type=Date&amp;theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=glimapp/glim&amp;type=Date" />
+    <img src="https://api.star-history.com/svg?repos=glimapp/glim&amp;type=Date" alt="Glim GitHub star history" width="100%" />
   </picture>
 </a>
 
 ## Download history
 
-<a href="https://github.com/NeoPanic/Glim/tree/codex/download-stats">
+<a href="https://github.com/glimapp/glim/tree/codex/download-stats">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NeoPanic/Glim/refs/heads/codex/download-stats/downloads-dark.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/NeoPanic/Glim/refs/heads/codex/download-stats/downloads.svg" />
-    <img src="https://raw.githubusercontent.com/NeoPanic/Glim/refs/heads/codex/download-stats/downloads.svg" alt="Glim release download history" width="100%" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/glimapp/glim/refs/heads/codex/download-stats/downloads-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/glimapp/glim/refs/heads/codex/download-stats/downloads.svg" />
+    <img src="https://raw.githubusercontent.com/glimapp/glim/refs/heads/codex/download-stats/downloads.svg" alt="Glim release download history" width="100%" />
   </picture>
 </a>
 
