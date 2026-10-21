@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "repository": "NeoPanic/Glim",
+  "repository": "glimapp/glim",
   "timezone": "Asia/Shanghai",
   "metric": "published-release-asset-downloads",
   "snapshots": [
