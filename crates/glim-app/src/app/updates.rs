@@ -23,6 +23,7 @@ pub(crate) struct UpdateState {
     startup: Option<Task<()>>,
     exit_started: Option<std::time::Instant>,
     pending_check: bool,
+    manual_check: bool,
     maintenance: Option<Task<()>>,
     exit_generation: u64,
 }
@@ -44,6 +45,17 @@ impl UpdateState {
         {
             let cancelled = snapshot.phase == "cancelled" && self.snapshot.phase != "cancelled";
             self.snapshot = snapshot;
+            if self.manual_check
+                && matches!(
+                    self.snapshot.phase.as_str(),
+                    "available" | "ready" | "current" | "error" | "cancelled"
+                )
+            {
+                self.manual_check = false;
+                if self.snapshot.has_update() {
+                    cx.defer(open_updates_window);
+                }
+            }
             if self.snapshot.needs_quit_approval {
                 self.command("quit-request-received");
                 cx.defer(super::request_quit);
@@ -57,6 +69,7 @@ impl UpdateState {
             }
             cx.notify();
             cx.refresh_windows();
+            cx.defer(super::menus::update);
         }
 
         if self.exiting
@@ -122,10 +135,14 @@ impl UpdateState {
                         state.refresh(cx);
                     }
                     Err(error) => {
-                        state.message = Some(format!("Cannot prepare update backup: {error:#}"))
+                        state.manual_check = false;
+                        state.pending_check = false;
+                        state.message = Some(format!("Cannot prepare update backup: {error:#}"));
                     }
                 }
                 cx.notify();
+                cx.refresh_windows();
+                cx.defer(super::menus::update);
             });
         }));
         cx.notify();
@@ -293,6 +310,7 @@ pub(crate) fn init(cx: &mut App) {
         startup: None,
         exit_started: None,
         pending_check: false,
+        manual_check: false,
         maintenance: None,
         exit_generation: 0,
     });
@@ -365,10 +383,10 @@ fn open_updates_window(cx: &mut App) {
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
-            size(px(640.), px(520.)),
+            size(px(740.), px(640.)),
             cx,
         ))),
-        window_min_size: Some(size(px(600.), px(280.))),
+        window_min_size: Some(size(px(640.), px(320.))),
         ..TitleBar::window_options()
     };
     match gpui_kit::open_window(options, cx, |window, cx| {
@@ -384,15 +402,47 @@ fn open_updates_window(cx: &mut App) {
 }
 pub(crate) fn show_from_menu(cx: &mut App) {
     cx.defer(|cx| {
-        open_updates_window(cx);
-        command("check", cx);
+        if state(cx).is_some_and(|s| {
+            let s = s.read(cx);
+            !s.snapshot.enabled || s.snapshot.has_update()
+        }) {
+            open_updates_window(cx);
+        } else {
+            command("check", cx);
+        }
     });
+}
+pub(crate) fn check_label(cx: &App) -> &'static str {
+    let Some(state) = state(cx) else {
+        return "Check…";
+    };
+    let state = state.read(cx);
+    if state.manual_check || state.snapshot.phase == "checking" {
+        return "Checking for updates…";
+    }
+    if state.message.is_some() || state.snapshot.phase == "error" {
+        return "Update could not complete";
+    }
+    match state.snapshot.phase.as_str() {
+        "current" => "You’re up to date",
+        "available" | "ready" => "An update is available",
+        _ => "Check…",
+    }
+}
+pub(crate) fn checking(cx: &App) -> bool {
+    state(cx).is_some_and(|s| s.read(cx).manual_check || s.read(cx).snapshot.phase == "checking")
 }
 pub(crate) fn command(command: &str, cx: &mut App) {
     let Some(state) = state(cx) else { return };
     state.update(cx, |state, cx| {
         if state.exiting {
             return;
+        }
+        if command == "check" {
+            if state.manual_check || state.snapshot.phase == "checking" {
+                return;
+            }
+            state.manual_check = true;
         }
         state.message = None;
         if state.backup.is_none() {
@@ -403,6 +453,8 @@ pub(crate) fn command(command: &str, cx: &mut App) {
             state.refresh(cx);
         }
         cx.notify();
+        cx.refresh_windows();
+        cx.defer(super::menus::update);
     });
 }
 pub(crate) fn install(cx: &mut App) {
@@ -591,6 +643,7 @@ mod tests {
                 startup: None,
                 exit_started: None,
                 pending_check: false,
+                manual_check: false,
                 maintenance: None,
                 exit_generation: 0,
             });

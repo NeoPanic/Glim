@@ -24,8 +24,10 @@ pub(super) enum Content {
     Commit(glim_services::binary::BytePreview, Option<PathBuf>),
     Image(glim_services::media::ImageDocument),
     XMind(glim_services::xmind::MindMap),
+    Opml(glim_services::opml::Document),
     Book(glim_services::books::Book),
     Native(PathBuf, bool, bool),
+    Sqlite(PathBuf),
     Diff(DiffDocument, PathBuf),
     Unavailable(PathBuf, String),
 }
@@ -456,9 +458,12 @@ impl Workspace {
             Content::Commit(d, _) => d.path.clone(),
             Content::Image(d) => d.path.clone(),
             Content::XMind(d) => d.path.clone(),
+            Content::Opml(d) => d.path.clone(),
             Content::Book(d) => d.path.clone(),
             Content::Diff(d, root) => root.join(&d.change.path),
-            Content::Native(path, ..) | Content::Unavailable(path, _) => path.clone(),
+            Content::Sqlite(path) | Content::Native(path, ..) | Content::Unavailable(path, _) => {
+                path.clone()
+            }
         };
         let _scope = glim_services::diagnostics::FileScope::enter(&path, "initialize");
         log::info!("reader initialize file={}", path.display());
@@ -482,8 +487,10 @@ impl Workspace {
             Content::Commit(d, file) => Reader::from_commit(d.path, d.text, file, window, cx),
             Content::Image(d) => Reader::from_image(d, window, cx),
             Content::XMind(d) => Reader::from_xmind(d, cx),
+            Content::Opml(d) => Reader::from_opml(d, cx),
             Content::Book(d) => Reader::from_book(d, window, cx),
             Content::Diff(d, r) => Reader::from_diff(d, &r, window, cx),
+            Content::Sqlite(path) => Reader::from_sqlite(path, window, cx),
             Content::Native(path, folder, shuffle) => {
                 Reader::from_native(path, folder, shuffle, cx)
             }
@@ -735,6 +742,21 @@ fn read_content_inner(
     cancel: &glim_services::work::Cancellation,
 ) -> anyhow::Result<Content> {
     cancel.check()?;
+    if glim_services::plist::is_binary(path) {
+        return glim_services::plist::read(path, cancel).map(Content::Page);
+    }
+    if glim_services::opml::supports(path) {
+        return match glim_services::opml::read(path, cancel) {
+            Ok(document) => Ok(Content::Opml(document)),
+            Err(_) => glim_services::paged::read_page(path, 0, false).map(Content::Page),
+        };
+    }
+    if glim_services::drawio::supports(path) {
+        return match glim_services::drawio::read(path, cancel) {
+            Ok(document) => Ok(Content::Image(document)),
+            Err(_) => glim_services::paged::read_page(path, 0, false).map(Content::Page),
+        };
+    }
     if glim_services::executables::supports(path) {
         return glim_services::executables::read_preview_cancellable(path, cancel)
             .map(Content::Page);
@@ -764,6 +786,9 @@ fn read_content_inner(
     }
     if glim_services::formats::supports(path) {
         return glim_services::formats::read_preview_cancellable(path, cancel).map(Content::Page);
+    }
+    if glim_services::sqlite::supports(path) || glim_services::sqlite::has_header(path) {
+        return Ok(Content::Sqlite(path.to_path_buf()));
     }
     if glim_services::preview::can_open(path) {
         return Ok(Content::Native(path.to_path_buf(), false, false));

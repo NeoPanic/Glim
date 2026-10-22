@@ -125,8 +125,8 @@ pub fn language_for_path(path: &Path) -> &'static str {
         "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "cu" | "cuh" | "metal" => "cpp",
         "css" | "less" | "scss" => "css",
         // HTML provides basic tag highlighting, not full Vue/XML language semantics.
-        "gpx" | "kml" | "html" | "htm" | "vue" | "xml" | "xsd" | "xsl" | "plist" | "mtlx"
-        | "tmx" | "hbs" => "html",
+        "opml" | "drawio" | "gpx" | "kml" | "html" | "htm" | "vue" | "xml" | "xsd" | "xsl"
+        | "plist" | "mtlx" | "tmx" | "hbs" => "html",
         "yml" | "yaml" | "ocio" => "yaml",
         "sh" | "bash" | "zsh" | "command" => "bash",
         "swift" => "swift",

@@ -516,6 +516,16 @@ impl Render for Workspace {
                 }
             }))
             .on_action(cx.listener(|v, _: &ToggleWordWrap, w, cx| v.toggle_word_wrap(w, cx)))
+            .on_action(
+                cx.listener(|v, _: &gpui_kit::component::input::Copy, _, cx| {
+                    if !v
+                        .active_reader()
+                        .is_some_and(|reader| reader.copy_image(cx))
+                    {
+                        cx.propagate();
+                    }
+                }),
+            )
             .on_action(cx.listener(|v, _: &NextTab, w, cx| {
                 if !v.tabs.is_empty() {
                     v.activate_tab((v.active.unwrap_or(0) + 1) % v.tabs.len(), w, cx);

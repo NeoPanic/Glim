@@ -143,6 +143,8 @@ final class LiveImageText: NSObject, ImageAnalysisOverlayViewDelegate {
         overlay.delegate = self
         overlay.trackingImageView = imageView
         overlay.preferredInteractionTypes = .textSelection
+        // Keep text selection available without the persistent Live Text badge.
+        overlay.isSupplementaryInterfaceHidden = true
         surface.addSubview(overlay)
         imageView.addSubview(surface)
     }

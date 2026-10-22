@@ -19,7 +19,7 @@ pub fn parse(text: &str) -> Result<Vec<JsonNode>> {
     let value: Value = serde_json::from_str(text)?;
     nodes_for_value(value)
 }
-fn nodes_for_value(value: Value) -> Result<Vec<JsonNode>> {
+pub(crate) fn nodes_for_value(value: Value) -> Result<Vec<JsonNode>> {
     let mut nodes = Vec::new();
     fn add(key: String, value: Value, nodes: &mut Vec<JsonNode>) -> Result<usize> {
         ensure!(
@@ -205,6 +205,75 @@ pub fn parse_format(text: &str, format: &str) -> Result<Vec<JsonNode>> {
         "jsonc" => parse_jsonc(text),
         _ => parse(text),
     }
+}
+
+/// Whitespace-only formatting preserves key order, duplicate keys and numeric literals.
+pub fn format_document(text: &str) -> anyhow::Result<String> {
+    let _: serde::de::IgnoredAny = serde_json::from_str(text)?;
+    let mut compact = Vec::with_capacity(text.len());
+    let (mut quoted, mut escaped) = (false, false);
+    for ch in text.chars() {
+        if quoted {
+            compact.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+        } else if ch == '"' {
+            quoted = true;
+            compact.push(ch);
+        } else if !ch.is_ascii_whitespace() {
+            compact.push(ch);
+        }
+    }
+    let mut output = String::with_capacity(text.len());
+    let (mut depth, mut quoted, mut escaped) = (0_usize, false, false);
+    for (index, ch) in compact.iter().copied().enumerate() {
+        if quoted {
+            output.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => {
+                quoted = true;
+                output.push(ch);
+            }
+            '{' | '[' => {
+                output.push(ch);
+                depth += 1;
+                if !matches!(compact.get(index + 1), Some('}' | ']')) {
+                    output.push('\n');
+                    output.push_str(&"  ".repeat(depth));
+                }
+            }
+            '}' | ']' => {
+                depth = depth.saturating_sub(1);
+                if index > 0 && !matches!(compact[index - 1], '{' | '[') {
+                    output.push('\n');
+                    output.push_str(&"  ".repeat(depth));
+                }
+                output.push(ch);
+            }
+            ',' => {
+                output.push_str(",\n");
+                output.push_str(&"  ".repeat(depth));
+            }
+            ':' => output.push_str(": "),
+            _ => output.push(ch),
+        }
+    }
+    output.push('\n');
+    Ok(output)
 }
 
 #[cfg(test)]

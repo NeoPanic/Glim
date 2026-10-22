@@ -101,6 +101,7 @@ final class HTMLPreview: NSObject, WKNavigationDelegate {
     private let document: URL
     private let documentURL: URL
     private let loading = NSTextField(labelWithString: L("Loading preview…"))
+    private var escapeMonitor: Any?
     private var loaded = false
     private var anchor: String?
     var pendingNavigation: String?
@@ -115,6 +116,26 @@ final class HTMLPreview: NSObject, WKNavigationDelegate {
         configuration.websiteDataStore = .nonPersistent()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.setURLSchemeHandler(resources, forURLScheme: "glim-html")
+        // WebKit may keep the outgoing 3D slide visible during Reveal transitions.
+        // Scope the compatibility rule to presentation mode; overview/printing
+        // still show all slides. This decorates the preview, not the source file.
+        configuration.userContentController.addUserScript(WKUserScript(source: """
+        (() => {
+          const style = document.createElement('style');
+          style.textContent = `
+            html:not(.print-pdf) .reveal:not(.overview) .slides > section:not(.present),
+            html:not(.print-pdf) .reveal:not(.overview) .slides > section.present > section:not(.present) {
+              visibility: hidden !important;
+              pointer-events: none !important;
+            }
+            .reveal .slides section {
+              -webkit-backface-visibility: hidden;
+              backface-visibility: hidden;
+            }
+          `;
+          (document.head || document.documentElement).appendChild(style);
+        })();
+        """, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         web = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         web.navigationDelegate = self
@@ -126,6 +147,17 @@ final class HTMLPreview: NSObject, WKNavigationDelegate {
             web.topAnchor.constraint(equalTo: view.topAnchor), web.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             loading.centerXAnchor.constraint(equalTo: view.centerXAnchor), loading.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, event.keyCode == 53,
+                  event.window === self.view.window, !self.view.isHiddenOrHasHiddenAncestor,
+                  let host = self.view.superview as? NativePreviewHost,
+                  let parent = host.superview, host.frame == parent.bounds,
+                  let gpui = host.gpuiView else { return event }
+            // Native WebKit focus bypasses GPUI's capture_key_down. Send this
+            // Escape directly to the owning GPUI view so it restores the reader.
+            DispatchQueue.main.async { [weak gpui] in gpui?.keyDown(with: event) }
+            return nil
+        }
         web.load(URLRequest(url: documentURL))
     }
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
@@ -183,7 +215,9 @@ final class HTMLPreview: NSObject, WKNavigationDelegate {
             self.web.takeSnapshot(with: configuration) { image, _ in completion(image) }
         }
     }
+    deinit { if let monitor = escapeMonitor { NSEvent.removeMonitor(monitor) } }
     func close() {
+        if let monitor = escapeMonitor { NSEvent.removeMonitor(monitor); escapeMonitor = nil }
         web.stopLoading(); web.navigationDelegate = nil
         resources.close(); web.removeFromSuperview()
     }

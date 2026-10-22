@@ -76,6 +76,7 @@ pub struct Explorer {
     clicked_path: Option<PathBuf>,
     clicked_root: Option<usize>,
     pending_reveal: Option<PathBuf>,
+    pending_reveal_root: Option<u64>,
     preserve_next_reveal: Option<PathBuf>,
     focus: FocusHandle,
     scroll: UniformListScrollHandle,
@@ -112,6 +113,7 @@ impl Explorer {
             clicked_path: None,
             clicked_root: None,
             pending_reveal: None,
+            pending_reveal_root: None,
             preserve_next_reveal: None,
             focus: cx.focus_handle(),
             scroll: UniformListScrollHandle::new(),
@@ -157,6 +159,7 @@ impl Explorer {
             self.clicked_path = None;
         }
         self.pending_reveal = None;
+        self.pending_reveal_root = None;
         self.preserve_next_reveal = None;
         self.clipped_labels.clear();
         let roots = &self.roots;
@@ -190,6 +193,7 @@ impl Explorer {
         self.clicked_path = None;
         self.clicked_root = None;
         self.pending_reveal = None;
+        self.pending_reveal_root = None;
         self.preserve_next_reveal = None;
         cx.notify();
     }
@@ -277,6 +281,7 @@ impl Explorer {
                             .is_some_and(|target| target.starts_with(&path))
                         {
                             view.pending_reveal = None;
+                            view.pending_reveal_root = None;
                         }
                         view.expansion_changed(cx);
                         cx.emit(ExplorerEvent::Error(format!("{error:#}")));
@@ -296,9 +301,41 @@ impl Explorer {
         // Keep that click's scroll position; explicit tab changes still reveal.
         if self.preserve_next_reveal.take().as_ref() == Some(&path) {
             self.pending_reveal = None;
+            self.pending_reveal_root = None;
             cx.notify();
             return;
         }
+        // Several activation/install callbacks may reveal the same file. The
+        // clicked occurrence is already correct, even when another root also
+        // contains that path; do not recenter or switch root occurrences.
+        if self.clicked_path.as_ref() == Some(&path)
+            && self
+                .selected
+                .and_then(|index| self.rows.get(index))
+                .is_some_and(|row| {
+                    row.entry.path == path && self.clicked_root == Some(row.root_index)
+                })
+        {
+            self.pending_reveal = None;
+            self.pending_reveal_root = None;
+            return;
+        }
+        // Capture the root identity before clearing selection. IDs survive
+        // asynchronous directory loads and distinguish duplicate root entries.
+        self.pending_reveal_root = self
+            .clicked_root
+            .filter(|index| {
+                self.roots
+                    .get(*index)
+                    .is_some_and(|root| path.starts_with(root))
+            })
+            .and_then(|index| self.root_ids.get(index))
+            .copied()
+            .or_else(|| {
+                (self.pending_reveal.as_ref() == Some(&path))
+                    .then_some(self.pending_reveal_root)
+                    .flatten()
+            });
         self.selected = None;
         self.pending_reveal = self
             .roots
@@ -323,7 +360,12 @@ impl Explorer {
             .iter()
             .enumerate()
             .filter(|(_, root)| target.starts_with(root))
-            .max_by_key(|(_, root)| root.components().count())
+            .max_by_key(|(index, root)| {
+                (
+                    self.pending_reveal_root == self.root_ids.get(*index).copied(),
+                    root.components().count(),
+                )
+            })
             .map(|(index, root)| (index, root.clone()))
         else {
             return;
@@ -352,6 +394,7 @@ impl Explorer {
                     .any(|entry| entry.path == path && entry.is_dir && !entry.is_symlink)
                 {
                     self.pending_reveal = None;
+                    self.pending_reveal_root = None;
                     ready = false;
                     break;
                 }
@@ -369,6 +412,7 @@ impl Explorer {
         }
         if ready {
             self.pending_reveal = None;
+            self.pending_reveal_root = None;
             if let Some(index) = self
                 .rows
                 .iter()
@@ -497,6 +541,7 @@ impl Explorer {
             return;
         };
         self.pending_reveal = None;
+        self.pending_reveal_root = None;
         self.preserve_next_reveal = None;
         self.selected = Some(index);
         window.focus(&self.focus, cx);
@@ -505,6 +550,7 @@ impl Explorer {
             cx.emit(ExplorerEvent::OpenFile(row.entry.path));
         } else {
             self.pending_reveal = None;
+            self.pending_reveal_root = None;
             if !self.expanded[row.root_index].remove(&row.entry.path) {
                 self.expanded[row.root_index].insert(row.entry.path.clone());
                 self.load_directory(row.entry.path, cx);

@@ -42,6 +42,7 @@ pub struct Workspace {
     page: Page,
     file_fullscreen: bool,
     file_fullscreen_entered_window: bool,
+    file_fullscreen_seen_window: bool,
     sidebar_selection: Option<&'static str>,
     history: Vec<header::Target>,
     history_cursor: Option<usize>,
@@ -194,6 +195,7 @@ impl Workspace {
             page: Page::Start,
             file_fullscreen: false,
             file_fullscreen_entered_window: false,
+            file_fullscreen_seen_window: false,
             sidebar_selection: Some("start"),
             word_wrap: cx
                 .try_global::<crate::app::ReaderPreferences>()
@@ -242,6 +244,21 @@ impl Workspace {
             confirm_task: None,
             context_menu_task: None,
         };
+        workspace
+            .subscriptions
+            .push(cx.observe_window_bounds(window, |view, window, cx| {
+                if !view.file_fullscreen {
+                    return;
+                }
+                if window.is_fullscreen() {
+                    view.file_fullscreen_seen_window = true;
+                } else if view.file_fullscreen_seen_window {
+                    view.set_file_fullscreen(false, window);
+                    view.sidebar_window_width = 0.;
+                    cx.notify();
+                }
+            }));
+
         if let Some(path) = path {
             workspace.open_path(path, window, cx);
         }

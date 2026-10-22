@@ -1,4 +1,5 @@
-//! Snapshot SQLite families before previewing, so WAL recovery never touches source files.
+pub mod browser;
+// Snapshot SQLite families before previewing, so WAL recovery never touches source files.
 use anyhow::{Result, ensure};
 use std::{
     fs,

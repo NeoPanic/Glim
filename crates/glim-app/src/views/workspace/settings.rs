@@ -7,6 +7,7 @@ use gpui_kit::{
         button::Button,
         h_flex,
         menu::{DropdownMenu, PopupMenuItem},
+        switch::Switch,
         v_flex,
     },
     *,
@@ -109,13 +110,20 @@ impl Workspace {
             .accessibility_label(glim_services::locale::tr("Default File Types…"))
             .on_click(|_, window, cx| window.dispatch_action(Box::new(DefaultApplications), cx))
             .into_any_element();
-        let updates = action_button("settings-updates", "Check…")
+        let updates = action_button("settings-updates", crate::app::updates::check_label(cx))
+            .disabled(crate::app::updates::busy(cx) || crate::app::updates::checking(cx))
             .accessibility_label(glim_services::locale::tr("Check for Updates…"))
             .on_click(|_, window, cx| window.dispatch_action(Box::new(CheckForUpdates), cx))
             .into_any_element();
         let shortcuts = action_button("settings-shortcuts", "View…")
             .accessibility_label(glim_services::locale::tr("Keyboard Shortcuts…"))
             .on_click(|_, window, cx| window.dispatch_action(Box::new(KeyboardShortcuts), cx))
+            .into_any_element();
+        let telemetry = Switch::new("settings-telemetry")
+            .small()
+            .checked(cx.global::<crate::app::telemetry::Telemetry>().enabled)
+            .accessibility_label(glim_services::locale::tr("Anonymous usage telemetry"))
+            .on_click(|enabled, _, cx| crate::app::telemetry::set_enabled(*enabled, cx))
             .into_any_element();
         let row = |label: &'static str, detail: &'static str, control: AnyElement| {
             let mut text = v_flex()
@@ -179,7 +187,9 @@ impl Workspace {
                             group()
                                 .child(row("Check for Updates…", "", updates))
                                 .child(divider())
-                                .child(row("Keyboard Shortcuts…", "", shortcuts)),
+                                .child(row("Keyboard Shortcuts…", "", shortcuts))
+                                .child(divider())
+                                .child(row("Anonymous usage telemetry", "", telemetry)),
                         ),
                 ),
             )

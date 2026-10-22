@@ -9,6 +9,24 @@ use gpui_kit::{
     *,
 };
 
+#[derive(Clone)]
+struct DraggedTab {
+    workspace: EntityId,
+    target: super::header::Target,
+    label: String,
+}
+impl Render for DraggedTab {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .px_3()
+            .py_1()
+            .rounded(px(7.))
+            .bg(cx.theme().secondary)
+            .text_xs()
+            .child(self.label.clone())
+    }
+}
+
 enum TabMenuAction {
     Close(Vec<super::header::Target>),
     Trash(std::path::PathBuf),
@@ -217,6 +235,50 @@ impl Workspace {
 }
 
 impl Workspace {
+    fn reorder_tab(
+        &mut self,
+        source: &super::header::Target,
+        destination: &super::header::Target,
+        after: bool,
+        cx: &mut Context<Self>,
+    ) {
+        // Resolve identities at drop time: a tab may have closed during the drag.
+        let Some(from) = self
+            .tabs
+            .iter()
+            .position(|tab| super::header::Target::from_reader(tab) == *source)
+        else {
+            return;
+        };
+        let Some(target) = self
+            .tabs
+            .iter()
+            .position(|tab| super::header::Target::from_reader(tab) == *destination)
+        else {
+            return;
+        };
+        let gap = target + usize::from(after);
+        let to = if from < gap { gap - 1 } else { gap };
+        if from == to {
+            return;
+        }
+        let reader = self.tabs.remove(from);
+        self.tabs.insert(to, reader);
+        self.active = self.active.map(|active| {
+            if active == from {
+                to
+            } else if from < active && active <= to {
+                active - 1
+            } else if to <= active && active < from {
+                active + 1
+            } else {
+                active
+            }
+        });
+        self.tab_scroll.scroll_to_item(to);
+        cx.notify();
+    }
+
     pub(super) fn tab_bar(&self, cx: &mut Context<Self>) -> AnyElement {
         let tabs = self
             .tabs
@@ -250,6 +312,16 @@ impl Workspace {
                 let hint_title = label.clone();
                 let hint_bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::default()));
                 let painted_hint_bounds = hint_bounds.clone();
+                let drop_bounds = hint_bounds.clone();
+                let drop_target = target.clone();
+                let dragged = DraggedTab {
+                    workspace: cx.entity_id(),
+                    target: target.clone(),
+                    label: label.clone(),
+                };
+                let workspace_id = cx.entity_id();
+                let drop_color = cx.theme().secondary;
+
                 h_flex()
                     .id(("document-tab", index))
                     .relative()
@@ -287,6 +359,27 @@ impl Workspace {
                         cx.theme().background
                     })
                     .cursor_pointer()
+                    .on_drag(dragged, |drag, _, _, cx| {
+                        cx.stop_propagation();
+                        cx.new(|_| drag.clone())
+                    })
+                    .drag_over::<DraggedTab>(move |style, drag, _, _| {
+                        if drag.workspace == workspace_id {
+                            style.bg(drop_color)
+                        } else {
+                            style
+                        }
+                    })
+                    .on_drop(cx.listener(move |view, drag: &DraggedTab, window, cx| {
+                        if drag.workspace != cx.entity_id() {
+                            return;
+                        }
+                        let bounds = drop_bounds.get();
+                        let after =
+                            window.mouse_position().x >= bounds.origin.x + bounds.size.width / 2.;
+                        view.reorder_tab(&drag.target, &drop_target, after, cx);
+                        cx.stop_propagation();
+                    }))
                     .on_click(cx.listener(move |view, _, window, cx| {
                         view.activate_tab(index, window, cx);
                         view.tabs[index].reveal_native(cx);

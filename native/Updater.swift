@@ -161,6 +161,7 @@ final class GlimUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate {
             if !started { start() }
             guard started else { return }
             attention &+= 1
+            phase = "checking"; message = ""
             updater?.checkForUpdates()
         case "manual", "notify", "automatic":
             guard started else { return }

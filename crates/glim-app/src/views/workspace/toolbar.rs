@@ -15,6 +15,7 @@ impl Workspace {
             return;
         }
         if enabled {
+            self.file_fullscreen_seen_window = window.is_fullscreen();
             self.file_fullscreen_entered_window = !window.is_fullscreen();
             if self.file_fullscreen_entered_window {
                 window.toggle_fullscreen();
@@ -24,6 +25,7 @@ impl Workspace {
                 window.toggle_fullscreen();
             }
             self.file_fullscreen_entered_window = false;
+            self.file_fullscreen_seen_window = false;
         }
         self.file_fullscreen = enabled;
     }

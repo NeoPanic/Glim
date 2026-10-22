@@ -123,6 +123,8 @@ This page is generated from the same policy. After editing it, run `python3 scri
 | `spreadsheet.input_bytes` | None | bytes | unlimited | XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap. |
 | `spreadsheet.sheet_text_bytes` | None | bytes | unlimited | XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap. |
 | `spreadsheet.html_bytes` | None | bytes | unlimited | XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap. |
+| `spreadsheet.column_window` | 256 | columns | page | Columns per worksheet presentation page, independent of the SQLite browser. |
+| `spreadsheet.catalog_window` | 5,000 | items | page | Worksheet catalog entries per page. |
 
 ## xmind
 
@@ -207,9 +209,9 @@ This page is generated from the same policy. After editing it, run `python3 scri
 | Key | Value | Unit | Effect | Behavior |
 | --- | ---: | --- | --- | --- |
 | `sqlite.snapshot_bytes` | None | bytes | unlimited | Copy the snapshot in fixed-size blocks, without an application database total-size gate. |
-| `sqlite.page_rows` | 500 | rows | page | Rows per table/schema page; previous/next controls expose all remaining rows. |
-| `sqlite.tables` | 5,000 | items | page | Catalog/column page size with explicit continuation to the remaining entries. |
-| `sqlite.columns` | 256 | columns | page | Catalog/column page size with explicit continuation to the remaining entries. |
+| `sqlite.page_rows` | 500 | rows | page | Rows buffered per table/schema page, independent of total table size; a persistent pager provides row counts, page jumps and first/last navigation. |
+| `sqlite.tables` | None | items | unlimited | List all tables and views without an application catalog-size cap. |
+| `sqlite.columns` | None | columns | unlimited | All SQLite columns are accessible; horizontal virtualization bounds the working set. |
 | `sqlite.value_bytes` | None | bytes | unlimited | Use native SQLite format constraints; full values and definitions are read in text.page_bytes windows with previous/next navigation. |
 | `sqlite.text_bytes` | 512 | bytes | budget | Visible cell summary only; double-click opens a complete paged value, with binary values shown as hex. |
 | `sqlite.schema_text_bytes` | None | bytes | unlimited | Use native SQLite format constraints; full values and definitions are read in text.page_bytes windows with previous/next navigation. |
@@ -217,6 +219,7 @@ This page is generated from the same policy. After editing it, run `python3 scri
 | `sqlite.query_seconds` | 5 | seconds | timeout | Initial cancellable query time allowance; Retry with more time explicitly extends it. |
 | `sqlite.busy_milliseconds` | 1,000 | milliseconds | timeout | Native SQLite lock-wait allowance; a busy database can be retried and is not rejected by file size. |
 | `sqlite.cache_kib` | 8,192 | KiB | budget | SQLite page-cache working memory; larger databases read further pages from disk. |
+| `sqlite.column_window` | 32 | columns | page | Columns fetched per horizontal viewport window, without a total column limit. |
 
 ## markup
 
@@ -359,3 +362,19 @@ This page is generated from the same policy. After editing it, run `python3 scri
 | `word.zoom_min_percent` | 25 | percent | budget | Minimum Word reading-view presentation zoom; does not constrain source content. |
 | `word.zoom_max_percent` | 400 | percent | budget | Maximum Word reading-view presentation zoom; does not constrain source content. |
 | `word.zoom_step_percent` | 25 | percent | budget | Zoom-in/out button increment in Word reading view; reset restores 100 percent. |
+
+## drawio
+
+| Key | Value | Unit | Effect | Behavior |
+| --- | ---: | --- | --- | --- |
+| `drawio.xml_bytes` | 32 MiB | bytes | budget | Maximum source or expanded diagram XML per preview; larger documents fall back to source pages. |
+| `drawio.nesting` | 64 | levels | budget | Bound parent traversal and detect cyclic groups. |
+| `drawio.preview_bytes` | 128 MiB | bytes | budget | Aggregate encoded PNG page memory; larger documents fall back to source pages. |
+
+## opml
+
+| Key | Value | Unit | Effect | Behavior |
+| --- | ---: | --- | --- | --- |
+| `opml.xml_bytes` | 16 MiB | bytes | budget | OPML XML preview budget; fall back to source pages when exceeded. |
+| `opml.nodes` | 100,000 | items | budget | Maximum resident outline nodes. |
+| `opml.nesting` | 256 | levels | budget | Maximum outline nesting depth. |

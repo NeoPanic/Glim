@@ -28,7 +28,7 @@ impl NativeMenu {
         let position = window.mouse_position();
         let items = items
             .iter()
-            .map(|(title, enabled)| serde_json::json!({"title": title, "enabled": enabled}))
+            .map(|(title, enabled)| serde_json::json!({"title": title, "enabled": enabled, "symbol": title.as_deref().and_then(menu_symbol)}))
             .collect::<Vec<_>>();
         let bytes = serde_json::to_vec(&items).expect("Context menu titles");
         // SAFETY: AppKit's live parent view is owned by this window. Swift copies
@@ -72,4 +72,29 @@ impl Drop for NativeMenu {
         // SAFETY: release this sole retained controller and cancel open tracking.
         unsafe { glim_context_menu_release(self.handle.as_ptr()) }
     }
+}
+
+fn menu_symbol(title: &str) -> Option<&'static str> {
+    use glim_services::locale::tr;
+    [
+        ("Open", "arrow.up.forward.app"),
+        ("Open Preview / Play", "play"),
+        ("Play in Order", "play"),
+        ("Shuffle Play", "shuffle"),
+        ("Reveal in Finder", "folder"),
+        ("Copy Relative Path", "doc.on.doc"),
+        ("Copy Absolute Path", "link"),
+        ("Move to Trash…", "trash"),
+        ("Remove Folder from Workspace", "folder.badge.minus"),
+        ("Close", "xmark"),
+        ("Close Tabs to the Right", "arrow.right.to.line"),
+        ("Close Other Tabs", "rectangle.stack"),
+        ("Close All Tabs", "xmark.rectangle"),
+        ("Cut", "scissors"),
+        ("Copy", "doc.on.doc"),
+        ("Paste", "doc.on.clipboard"),
+        ("Select All", "selection.pin.in.out"),
+    ]
+    .into_iter()
+    .find_map(|(label, symbol)| (title == tr(label)).then_some(symbol))
 }

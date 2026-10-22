@@ -123,6 +123,8 @@
 | `spreadsheet.input_bytes` | 取消 | bytes | 无应用层总量门槛 | XLSX 单元格、工作表名称和已保存公式流式写入磁盘索引，值可分页查看；取消输入、工作表、行列、单元格和 HTML 总量门槛。旧版 XLS 及超出单条 XML 工作预算的情况使用无应用大小门槛的系统原生预览。 |
 | `spreadsheet.sheet_text_bytes` | 取消 | bytes | 无应用层总量门槛 | XLSX 单元格、工作表名称和已保存公式流式写入磁盘索引，值可分页查看；取消输入、工作表、行列、单元格和 HTML 总量门槛。旧版 XLS 及超出单条 XML 工作预算的情况使用无应用大小门槛的系统原生预览。 |
 | `spreadsheet.html_bytes` | 取消 | bytes | 无应用层总量门槛 | XLSX 单元格、工作表名称和已保存公式流式写入磁盘索引，值可分页查看；取消输入、工作表、行列、单元格和 HTML 总量门槛。旧版 XLS 及超出单条 XML 工作预算的情况使用无应用大小门槛的系统原生预览。 |
+| `spreadsheet.column_window` | 256 | columns | 分页，可继续访问 | 工作表每个展示页的列数，与 SQLite 浏览器无关。 |
+| `spreadsheet.catalog_window` | 5,000 | items | 分页，可继续访问 | 工作表目录每页条目数。 |
 
 ## xmind
 
@@ -207,9 +209,9 @@
 | Key | 当前值 | 单位 | 超限效果 | 实际行为 |
 | --- | ---: | --- | --- | --- |
 | `sqlite.snapshot_bytes` | 取消 | bytes | 无应用层总量门槛 | 按固定大小缓冲块复制快照，不设置应用数据库总大小门槛。 |
-| `sqlite.page_rows` | 500 | rows | 分页，可继续访问 | 表格／结构每页行数，上一页／下一页可访问其余全部行。 |
-| `sqlite.tables` | 5,000 | items | 分页，可继续访问 | 目录／列的分页大小，有明确入口继续访问剩余条目。 |
-| `sqlite.columns` | 256 | columns | 分页，可继续访问 | 目录／列的分页大小，有明确入口继续访问剩余条目。 |
+| `sqlite.page_rows` | 500 | rows | 分页，可继续访问 | 表格／结构每页缓冲行数，与表总行数无关；常驻分页栏提供行数统计、页码跳转及首页／末页导航。 |
+| `sqlite.tables` | 取消 | items | 无应用层总量门槛 | 列出全部表和视图，不设置应用目录条目上限。 |
+| `sqlite.columns` | 取消 | columns | 无应用层总量门槛 | 所有 SQLite 列均可访问；通过横向虚拟化限制工作集。 |
 | `sqlite.value_bytes` | 取消 | bytes | 无应用层总量门槛 | 沿用原生 SQLite 格式约束；完整值及定义按 text.page_bytes 的窗口读取，并提供上一页／下一页。 |
 | `sqlite.text_bytes` | 512 | bytes | 处理／内存预算 | 仅控制单元格摘要；双击打开完整值分页，二进制值以十六进制显示。 |
 | `sqlite.schema_text_bytes` | 取消 | bytes | 无应用层总量门槛 | 沿用原生 SQLite 格式约束；完整值及定义按 text.page_bytes 的窗口读取，并提供上一页／下一页。 |
@@ -217,6 +219,7 @@
 | `sqlite.query_seconds` | 5 | seconds | 超时 | 初始可取消查询时间预算，“延长时间重试”可明确增加预算。 |
 | `sqlite.busy_milliseconds` | 1,000 | milliseconds | 超时 | 原生 SQLite 锁等待时间；数据库忙碌时可重试，与文件大小无关。 |
 | `sqlite.cache_kib` | 8,192 | KiB | 处理／内存预算 | SQLite 页缓存工作内存，较大的数据库继续从磁盘读取页面。 |
+| `sqlite.column_window` | 32 | columns | 分页，可继续访问 | 横向视口每次读取的列数，不限制总列数。 |
 
 ## markup
 
@@ -359,3 +362,19 @@
 | `word.zoom_min_percent` | 25 | percent | 处理／内存预算 | Word 阅读视图最小显示缩放，不约束源文件内容。 |
 | `word.zoom_max_percent` | 400 | percent | 处理／内存预算 | Word 阅读视图最大显示缩放，不约束源文件内容。 |
 | `word.zoom_step_percent` | 25 | percent | 处理／内存预算 | Word 阅读视图缩放按钮的百分比步长；重置恢复 100%。 |
+
+## drawio
+
+| Key | 当前值 | 单位 | 超限效果 | 实际行为 |
+| --- | ---: | --- | --- | --- |
+| `drawio.xml_bytes` | 32 MiB | bytes | 处理／内存预算 | 预览源文件或解压后单页 XML 的预算；超过预算时回退到源码分页。 |
+| `drawio.nesting` | 64 | levels | 处理／内存预算 | 限制父级遍历深度并检测循环分组。 |
+| `drawio.preview_bytes` | 128 MiB | bytes | 处理／内存预算 | 所有 PNG 预览页的总编码内存预算；超过时回退到源码分页。 |
+
+## opml
+
+| Key | 当前值 | 单位 | 超限效果 | 实际行为 |
+| --- | ---: | --- | --- | --- |
+| `opml.xml_bytes` | 16 MiB | bytes | 处理／内存预算 | OPML XML 预览预算；超过时回退到源码分页。 |
+| `opml.nodes` | 100,000 | items | 处理／内存预算 | 预览驻留大纲节点预算。 |
+| `opml.nesting` | 256 | levels | 处理／内存预算 | 大纲嵌套深度预算。 |

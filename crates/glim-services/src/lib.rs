@@ -9,6 +9,7 @@ pub mod formats;
 mod fragmented_mp4;
 pub mod geo;
 pub mod git;
+pub mod graph;
 pub mod inline_images;
 pub mod json;
 pub mod limits;
@@ -27,6 +28,7 @@ pub mod spreadsheet;
 pub mod sqlite;
 pub mod streamed;
 mod svg_preview;
+pub mod telemetry;
 pub mod text_formats;
 pub mod vector_formats;
 pub mod watch;
@@ -39,3 +41,9 @@ mod xml;
 pub mod updates;
 
 pub mod books;
+
+pub mod drawio;
+
+pub mod opml;
+
+pub mod plist;

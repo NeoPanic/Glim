@@ -5,15 +5,18 @@ mod csv;
 mod diagrams;
 mod diff;
 mod json;
+mod json_format;
 mod lexical;
 mod markup;
 mod media;
 mod native;
 
 mod native_bridge;
+mod opml;
 mod paged;
 mod pictures;
 mod source;
+mod sqlite;
 mod xmind;
 use diff::DiffReader;
 use glim_core::{DiffDocument, Document, DocumentKind, language_for_path};
@@ -82,6 +85,8 @@ enum Renderer {
         Arc<std::sync::atomic::AtomicBool>,
     ),
     Native(Entity<native::NativeReader>),
+    Sqlite(Entity<sqlite::SqliteReader>),
+    Opml(Entity<opml::OpmlReader>),
     Unavailable(UnavailableReader),
 }
 pub struct Reader {
@@ -96,6 +101,7 @@ pub struct Reader {
     json: Option<(Entity<json::JsonTree>, bool)>,
     csv: Option<(Entity<csv::CsvTable>, bool)>,
     renderer: Renderer,
+    structured_controls: Option<Entity<json_format::JsonFormat>>,
 }
 impl Reader {
     pub(crate) fn refresh_dependencies(&mut self, cx: &mut App) {
@@ -167,12 +173,39 @@ impl Reader {
             historical: false,
             commit_id: None,
             commit_file: None,
+            structured_controls: None,
             json,
             csv,
             renderer,
         };
         reader.restore_csv_preview(cx);
         reader
+    }
+    pub fn copy_image(&self, cx: &mut App) -> bool {
+        if let Renderer::Image(image) = &self.renderer
+            && let Some(page) = image.pages.get(*image.page.read(cx))
+        {
+            cx.write_to_clipboard(ClipboardItem::new_image(page));
+            return true;
+        }
+        false
+    }
+
+    pub fn from_sqlite(path: PathBuf, window: &mut Window, cx: &mut App) -> Self {
+        Self {
+            repository_root: None,
+            snapshot: "sqlite-preview".into(),
+            title: path.display().to_string().into(),
+            path: path.clone(),
+            diff: None,
+            historical: false,
+            commit_id: None,
+            commit_file: None,
+            structured_controls: None,
+            json: None,
+            csv: None,
+            renderer: Renderer::Sqlite(cx.new(|cx| sqlite::SqliteReader::new(path, window, cx))),
+        }
     }
     pub fn from_native(path: PathBuf, folder: bool, shuffle: bool, cx: &mut App) -> Self {
         Self::from_native_playback(path, folder, shuffle, true, cx)
@@ -193,6 +226,7 @@ impl Reader {
             historical: false,
             commit_id: None,
             commit_file: None,
+            structured_controls: None,
             json: None,
             csv: None,
             renderer: Renderer::Native(cx.new(|cx| {
@@ -299,6 +333,7 @@ impl Reader {
             historical: false,
             commit_id: None,
             commit_file: None,
+            structured_controls: None,
             json: None,
             csv,
             renderer: Renderer::Paged {
@@ -363,6 +398,7 @@ impl Reader {
             historical: true,
             commit_id,
             commit_file,
+            structured_controls: None,
             json: None,
             csv: None,
             renderer: Renderer::Diff(DiffReader {
@@ -397,6 +433,7 @@ impl Reader {
             historical: false,
             commit_id: None,
             commit_file: None,
+            structured_controls: None,
             json: None,
             csv: None,
             renderer: Renderer::Source(source),
@@ -423,6 +460,7 @@ impl Reader {
             historical: false,
             commit_id: None,
             commit_file: None,
+            structured_controls: None,
             json: None,
             csv: None,
             renderer,
@@ -459,6 +497,7 @@ impl Reader {
             historical: false,
             commit_id: None,
             commit_file: None,
+            structured_controls: None,
             json: None,
             csv: None,
             renderer,
@@ -482,6 +521,7 @@ impl Reader {
             historical: false,
             commit_id: None,
             commit_file: None,
+            structured_controls: None,
             json: None,
             csv: None,
             renderer: Renderer::Book(view, writing),
@@ -507,9 +547,26 @@ impl Reader {
             historical: false,
             commit_id: None,
             commit_file: None,
+            structured_controls: None,
             json: None,
             csv: None,
             renderer: Renderer::XMind(cx.new(|_| xmind::XMindReader::new(document))),
+        }
+    }
+    pub fn from_opml(document: glim_services::opml::Document, cx: &mut App) -> Self {
+        Self {
+            title: document.path.display().to_string().into(),
+            path: document.path.clone(),
+            snapshot: document.fingerprint.clone(),
+            repository_root: None,
+            diff: None,
+            historical: false,
+            commit_id: None,
+            commit_file: None,
+            structured_controls: None,
+            json: None,
+            csv: None,
+            renderer: Renderer::Opml(cx.new(|_| opml::OpmlReader::new(document))),
         }
     }
     pub fn unavailable(path: PathBuf, reason: String, _: &mut Window, _: &mut App) -> Self {
@@ -523,6 +580,7 @@ impl Reader {
             historical: false,
             commit_id: None,
             commit_file: None,
+            structured_controls: None,
             json: None,
             csv: None,
             renderer,
@@ -955,6 +1013,30 @@ impl Reader {
         }
         let _scope = glim_services::diagnostics::FileScope::enter(&self.path, "render");
         let content = self.render_content(open, cx);
+        let content = if self.diff.is_none() && glim_services::graph::supports(&self.path) {
+            if self.structured_controls.is_none() {
+                let editor = match &self.renderer {
+                    Renderer::Source(source) => Some(source.state.clone()),
+                    _ => None,
+                };
+                let path = self.path.clone();
+                self.structured_controls =
+                    Some(cx.new(|_| json_format::JsonFormat::new(path, editor)));
+            }
+            let blocked = matches!(&self.renderer, Renderer::Paged { .. }) && self.is_dirty();
+            self.structured_controls
+                .as_ref()
+                .unwrap()
+                .update(cx, |controls, _| controls.blocked = blocked);
+            div()
+                .relative()
+                .size_full()
+                .child(content)
+                .child(self.structured_controls.as_ref().unwrap().clone())
+                .into_any_element()
+        } else {
+            content
+        };
         boundary::FileBoundary {
             path: self.path.clone(),
             content,
@@ -979,6 +1061,8 @@ impl Reader {
             }
             Renderer::XMind(v) => v.clone().into_any_element(),
             Renderer::Book(v, _) => v.clone().into_any_element(),
+            Renderer::Opml(view) => view.clone().into_any_element(),
+            Renderer::Sqlite(view) => view.clone().into_any_element(),
             Renderer::Native(n) => n.clone().into_any_element(),
             Renderer::Paged {
                 html: Some((browser, true)),

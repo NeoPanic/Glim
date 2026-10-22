@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 import CoreServices
 import CoreText
 
-struct Playlist: Decodable { let files: [String]; let shuffle: Bool; let autoplay: Bool?; let playbackFiles: [String: String]?; let matroskaFiles: [String]?; let mediaHelper: String?; let mediaDirectory: String?; let mediaErrors: [String: String]?; let office: Bool?; let image: Bool?; let imagePath: String?; let imageWidth: Double?; let imageHeight: Double?; let associations: String?; let font: Bool?; let sqlite: String?; let sqliteInfo: String?; let spreadsheet: String?; let htmlContent: String?; let htmlFile: Bool?; let fileBytes: Bool?; let spreadsheetIndex: Bool?; let wordReading: String?; let spreadsheetCache: String?; let spreadsheetHelper: String?; let language: String?; let localizations: [String: String]? }
+struct Playlist: Decodable { let files: [String]; let shuffle: Bool; let autoplay: Bool?; let playbackFiles: [String: String]?; let matroskaFiles: [String]?; let mediaHelper: String?; let mediaDirectory: String?; let mediaErrors: [String: String]?; let office: Bool?; let image: Bool?; let imagePath: String?; let imageWidth: Double?; let imageHeight: Double?; let associations: String?; let font: Bool?; let sqlite: String?; let sqliteInfo: String?; let spreadsheet: String?; let htmlContent: String?; let htmlFile: Bool?; let fileBytes: Bool?; let spreadsheetIndex: Bool?; let wordReading: String?; let wordImagePages: Bool?; let spreadsheetCache: String?; let spreadsheetHelper: String?; let language: String?; let localizations: [String: String]? }
 
 var nativeTranslations: [String: String] = [:]
 func L(_ text: String) -> String { nativeTranslations[text] ?? text }
@@ -774,7 +774,6 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
     var imagePreview: ImagePreview?
     var htmlPreview: HTMLPreview?
     var htmlAnchor: String?
-    var sqlitePreview: SQLitePreview?
     var workbookPreview: WorkbookPreview?
     var wordPreview: WordPreview?
     var failed = Set<URL>()
@@ -815,15 +814,6 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             preview.view.autoresizingMask = [.width, .height]; host.addSubview(preview.view)
             return
         }
-        if let info = playlist.sqliteInfo {
-            var actions: [NSView] = []
-            if playlist.spreadsheetIndex == true { actions.append(externalOpenButton()) }
-            let preview = SQLitePreview(path: playlist.sqlite, information: info, extraControls: actions); sqlitePreview = preview
-            preview.view.frame = host.bounds
-            preview.view.autoresizingMask = [.width, .height]
-            host.addSubview(preview.view)
-            return
-        }
         if playlist.image == true {
             let imageURL = playlist.imagePath.map { URL(fileURLWithPath: $0) } ?? urls[0]
             let sourceSize = playlist.imageWidth.flatMap { width in playlist.imageHeight.map { NSSize(width: width, height: $0) } }
@@ -839,7 +829,7 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             return
         }
         if playlist.office == true {
-            showOffice(urls[0], spreadsheet: playlist.spreadsheet, wordReading: playlist.wordReading)
+            showOffice(urls[0], spreadsheet: playlist.spreadsheet, wordReading: playlist.wordReading, wordImagePages: playlist.wordImagePages == true)
             return
         }
         let content = NSStackView()
@@ -932,9 +922,9 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         // Leave AVKit's timeline clear when its own playback controls appear.
         FloatingReaderToolbar(items: toolbar).install(in: host, bottomInset: pdf ? 16 : 80, managesContextMenu: !pdf)
     }
-    func showOffice(_ url: URL, spreadsheet: String? = nil, wordReading: String? = nil) {
+    func showOffice(_ url: URL, spreadsheet: String? = nil, wordReading: String? = nil, wordImagePages: Bool = false) {
         if ["doc", "docx", "rtf"].contains(url.pathExtension.lowercased()) {
-            let preview = WordPreview(source: url, reading: wordReading.map { URL(fileURLWithPath: $0) }, extraControls: contentCopyControls() + [externalOpenButton()])
+            let preview = WordPreview(source: url, imagePages: wordImagePages, reading: wordReading.map { URL(fileURLWithPath: $0) }, extraControls: contentCopyControls() + [externalOpenButton()])
             wordPreview = preview
             preview.view.translatesAutoresizingMaskIntoConstraints = false; host.addSubview(preview.view)
             NSLayoutConstraint.activate([
@@ -993,11 +983,11 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             web.loadHTMLString(html, baseURL: nil)
             return
         }
-        // Word-processing documents need the full-sized reading presentation.
-        // Inspector-style compact previews can leave a narrow document strip
-        // inside a large viewport. Slides retain their undecorated presentation.
-        let wordProcessing = ["doc", "docx", "rtf", "pages"].contains(url.pathExtension.lowercased())
-        let style: QLPreviewViewStyle = wordProcessing ? .normal : .compact
+        // Only slides use the inspector-style presentation. In particular,
+        // Numbers compact previews can render a small centered thumbnail card
+        // even when the host fills the window; spreadsheets need normal layout.
+        let slides = ["ppt", "pptx", "key"].contains(url.pathExtension.lowercased())
+        let style: QLPreviewViewStyle = slides ? .compact : .normal
         guard let preview = QLPreviewView(frame: .zero, style: style) else {
             let alert = NSAlert(); alert.messageText = L("Document preview is unavailable"); alert.informativeText = L("Open this document in its default app to view it."); alert.runModal(); return
         }
@@ -1332,7 +1322,6 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         mediaPreparation?.cancel(); mediaPreparation = nil; mediaGeneration += 1
         imagePreview?.close()
         htmlPreview?.close()
-        sqlitePreview?.close()
         workbookPreview?.close()
         wordPreview?.close()
         officeView?.previewItem = nil

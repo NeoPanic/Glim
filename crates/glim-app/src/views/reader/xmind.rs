@@ -80,6 +80,9 @@ fn layout(sheet: &Sheet, collapsed: &HashSet<usize>) -> Layout {
 }
 pub(super) struct XMindReader {
     document: MindMap,
+    embedded: bool,
+    pan: Option<(Point<Pixels>, Point<Pixels>)>,
+    focus: Option<FocusHandle>,
     sheet: usize,
     selected: usize,
     collapsed: HashSet<usize>,
@@ -92,6 +95,9 @@ impl XMindReader {
         let selected = document.sheets[0].roots[0];
         let mut view = Self {
             document,
+            embedded: false,
+            pan: None,
+            focus: None,
             sheet: 0,
             selected,
             collapsed: HashSet::new(),
@@ -108,6 +114,35 @@ impl XMindReader {
         view.rebuild();
         view.center_root();
         view
+    }
+    pub(super) fn embedded(document: MindMap) -> Self {
+        let mut view = Self::new(document);
+        view.embedded = true;
+        view
+    }
+    pub(super) fn reset_view(&mut self, cx: &mut Context<Self>) {
+        self.zoom = 1.;
+        self.scroll.set_offset(point(px(0.), px(0.)));
+        self.center_root();
+        cx.notify();
+    }
+    pub(super) fn fold_all(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        self.collapsed = if collapsed {
+            (0..self.document.sheets[self.sheet].topics.len()).collect()
+        } else {
+            HashSet::new()
+        };
+        self.rebuild();
+        self.center_root();
+        cx.notify();
+    }
+    pub(super) fn copy_selected(&self, cx: &mut App) {
+        let topic = &self.document.sheets[self.sheet].topics[self.selected];
+        cx.write_to_clipboard(ClipboardItem::new_string(if topic.notes.is_empty() {
+            topic.title.clone()
+        } else {
+            topic.notes.clone()
+        }));
     }
     fn default_expansion(&mut self) {
         self.collapsed.clear();
@@ -136,21 +171,32 @@ impl XMindReader {
             ));
         }
     }
-    fn change_zoom(&mut self, delta: f32, cx: &mut Context<Self>) {
-        let old = self.zoom;
-        self.zoom = (self.zoom + delta).clamp(0.5, 1.5);
-        let offset = self.scroll.offset();
+    pub(super) fn change_zoom(&mut self, delta: f32, cx: &mut Context<Self>) {
         let viewport = self.scroll.bounds().size;
+        self.zoom_at(
+            self.zoom + delta,
+            point(viewport.width / 2., viewport.height / 2.),
+            cx,
+        );
+    }
+    fn zoom_at(&mut self, zoom: f32, anchor: Point<Pixels>, cx: &mut Context<Self>) {
+        if !zoom.is_finite() {
+            return;
+        }
+        let old = self.zoom;
+        self.zoom = zoom.clamp(0.1, 4.);
+        let offset = self.scroll.offset();
         let ratio = self.zoom / old;
         self.scroll.set_offset(point(
-            (offset.x - viewport.width / 2.) * ratio + viewport.width / 2.,
-            (offset.y - viewport.height / 2.) * ratio + viewport.height / 2.,
+            ((offset.x - anchor.x) * ratio + anchor.x).min(px(0.)),
+            ((offset.y - anchor.y) * ratio + anchor.y).min(px(0.)),
         ));
         cx.notify();
     }
 }
 impl Render for XMindReader {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let focus = self.focus.get_or_insert_with(|| cx.focus_handle()).clone();
         let sheet = &self.document.sheets[self.sheet];
         let topic = &sheet.topics[self.selected];
         let zoom = self.zoom;
@@ -166,6 +212,15 @@ impl Render for XMindReader {
                     && (p.y + 96.) * zoom + f32::from(offset.y) > -100.)
         };
         v_flex()
+            .track_focus(&focus)
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                window.focus(&focus, cx)
+            })
+            .on_action(
+                cx.listener(|view, _: &gpui_kit::component::input::Copy, _, cx| {
+                    view.copy_selected(cx)
+                }),
+            )
             .relative()
             .size_full()
             .min_h_0()
@@ -189,7 +244,11 @@ impl Render for XMindReader {
                                     .label(if sheet.title.is_empty() {
                                         format!("{} {}", tr("Sheet"), index + 1)
                                     } else {
-                                        sheet.title.clone()
+                                        if self.embedded {
+                                            tr("Interactive graph")
+                                        } else {
+                                            sheet.title.clone()
+                                        }
                                     })
                                     .on_click(cx.listener(move |v, _, _, cx| {
                                         v.sheet = index;
@@ -216,7 +275,37 @@ impl Render for XMindReader {
                             .h_full()
                             .overflow_scroll()
                             .track_scroll(&self.scroll)
+                            .on_pinch(cx.listener(|view, event: &PinchEvent, _, cx| {
+                                let anchor = event.position - view.scroll.bounds().origin;
+                                view.pan = None;
+                                view.zoom_at(view.zoom * (1. + event.delta), anchor, cx);
+                                cx.stop_propagation();
+                            }))
                             .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|view, event: &MouseDownEvent, _, _| {
+                                    view.pan = Some((event.position, view.scroll.offset()));
+                                }),
+                            )
+                            .on_mouse_move(cx.listener(|view, event: &MouseMoveEvent, _, cx| {
+                                if event.pressed_button == Some(MouseButton::Left) {
+                                    if let Some((origin, offset)) = view.pan {
+                                        view.scroll.set_offset(offset + (event.position - origin));
+                                        cx.notify();
+                                    }
+                                } else {
+                                    view.pan = None;
+                                }
+                            }))
+                            .on_mouse_up(
+                                MouseButton::Left,
+                                cx.listener(|view, _, _, _| view.pan = None),
+                            )
+                            .on_mouse_up_out(
+                                MouseButton::Left,
+                                cx.listener(|view, _, _, _| view.pan = None),
+                            )
                             .child(
                                 div()
                                     .relative()
@@ -297,8 +386,16 @@ impl Render for XMindReader {
                                                         .flex_1()
                                                         .min_h_0()
                                                         .overflow_hidden()
-                                                        .text_size(px(14. * zoom))
-                                                        .line_clamp(2)
+                                                        .text_size(px(if self.embedded {
+                                                            12. * zoom
+                                                        } else {
+                                                            14. * zoom
+                                                        }))
+                                                        .line_clamp(if self.embedded {
+                                                            4
+                                                        } else {
+                                                            2
+                                                        })
                                                         .child(if topic.title.is_empty() {
                                                             tr("Untitled topic")
                                                         } else {
@@ -367,7 +464,11 @@ impl Render for XMindReader {
                                 div()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(tr("Topic details")),
+                                    .child(tr(if self.embedded {
+                                        "Node details"
+                                    } else {
+                                        "Topic details"
+                                    })),
                             )
                             .child(
                                 div()
@@ -425,60 +526,65 @@ impl Render for XMindReader {
                             })),
                     ),
             )
-            .child(super::controls::floating(
-                "xmind-controls",
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .p_0()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr("Mind map · Read only")),
-                    )
-                    .child(
-                        Button::new("xmind-collapse-all")
-                            .label(tr("Collapse all"))
-                            .on_click(cx.listener(|v, _, _, cx| {
-                                v.collapsed =
-                                    (0..v.document.sheets[v.sheet].topics.len()).collect();
-                                v.rebuild();
+            .when(!self.embedded, |view| {
+                view.child(super::controls::persistent(
+                    "xmind-controls",
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .p_0()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr(if self.embedded {
+                                    "Interactive graph"
+                                } else {
+                                    "Mind map · Read only"
+                                })),
+                        )
+                        .child(
+                            Button::new("xmind-collapse-all")
+                                .label(tr("Collapse all"))
+                                .on_click(cx.listener(|v, _, _, cx| {
+                                    v.collapsed =
+                                        (0..v.document.sheets[v.sheet].topics.len()).collect();
+                                    v.rebuild();
+                                    v.center_root();
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("xmind-expand-all")
+                                .label(tr("Expand all"))
+                                .on_click(cx.listener(|v, _, _, cx| {
+                                    v.collapsed.clear();
+                                    v.rebuild();
+                                    v.center_root();
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("xmind-zoom-out")
+                                .label("−")
+                                .disabled(zoom <= 0.1)
+                                .on_click(cx.listener(|v, _, _, cx| v.change_zoom(-0.1, cx))),
+                        )
+                        .child(div().text_sm().child(format!("{:.0}%", zoom * 100.)))
+                        .child(
+                            Button::new("xmind-zoom-in")
+                                .label("+")
+                                .disabled(zoom >= 4.)
+                                .on_click(cx.listener(|v, _, _, cx| v.change_zoom(0.1, cx))),
+                        )
+                        .child(Button::new("xmind-reset").label(tr("Reset view")).on_click(
+                            cx.listener(|v, _, _, cx| {
+                                v.zoom = 1.;
                                 v.center_root();
                                 cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("xmind-expand-all")
-                            .label(tr("Expand all"))
-                            .on_click(cx.listener(|v, _, _, cx| {
-                                v.collapsed.clear();
-                                v.rebuild();
-                                v.center_root();
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("xmind-zoom-out")
-                            .label("−")
-                            .disabled(zoom <= 0.5)
-                            .on_click(cx.listener(|v, _, _, cx| v.change_zoom(-0.1, cx))),
-                    )
-                    .child(div().text_sm().child(format!("{:.0}%", zoom * 100.)))
-                    .child(
-                        Button::new("xmind-zoom-in")
-                            .label("+")
-                            .disabled(zoom >= 1.5)
-                            .on_click(cx.listener(|v, _, _, cx| v.change_zoom(0.1, cx))),
-                    )
-                    .child(Button::new("xmind-reset").label(tr("Reset view")).on_click(
-                        cx.listener(|v, _, _, cx| {
-                            v.zoom = 1.;
-                            v.center_root();
-                            cx.notify();
-                        }),
-                    )),
-                cx,
-            ))
+                            }),
+                        )),
+                ))
+            })
     }
 }

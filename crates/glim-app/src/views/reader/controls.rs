@@ -34,11 +34,12 @@ struct FloatingControls {
     id: &'static str,
     controls: AnyElement,
     bottom: Pixels,
+    persistent: bool,
 }
 impl RenderOnce for FloatingControls {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = window.use_keyed_state(self.id, cx, |_, _| HoverState::default());
-        let expanded = state.read(cx).expanded;
+        let expanded = self.persistent || state.read(cx).expanded;
         div()
             .id((ElementId::from(self.id), "hover-zone"))
             .absolute()
@@ -83,7 +84,7 @@ impl RenderOnce for FloatingControls {
                 div()
                     .id(self.id)
                     .when(!expanded, |view| view.invisible())
-                    .max_w(px(1100.))
+                    .max_w(relative(1.))
                     .min_w_0()
                     .px_3()
                     .py_2()
@@ -111,5 +112,16 @@ pub(super) fn floating_at(
         id,
         controls: controls.into_any_element(),
         bottom,
+        persistent: false,
+    }
+}
+
+/// Frequent canvas operations stay discoverable without a hidden hover target.
+pub(super) fn persistent(id: &'static str, controls: impl IntoElement) -> impl IntoElement {
+    FloatingControls {
+        id,
+        controls: controls.into_any_element(),
+        bottom: px(16.),
+        persistent: true,
     }
 }

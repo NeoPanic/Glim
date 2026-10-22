@@ -48,7 +48,6 @@ fn main() {
     println!("cargo:rerun-if-changed=../../native/FloatingReaderToolbar.swift");
     println!("cargo:rerun-if-changed=../../native/ReaderActions.swift");
     println!("cargo:rerun-if-changed=../../native/HTMLPreview.swift");
-    println!("cargo:rerun-if-changed=../../native/SQLitePreview.swift");
     println!("cargo:rerun-if-changed=../../native/WorkbookPreview.swift");
     println!("cargo:rerun-if-changed=../../native/WordPreview.swift");
     println!("cargo:rerun-if-changed=../../native/PreviewMain.swift");
@@ -84,7 +83,6 @@ fn main() {
             "5",
             "-target",
             &format!("{arch}-apple-macos11.0"),
-            "../../native/SQLitePreview.swift",
             "../../native/WorkbookPreview.swift",
             "../../native/WordPreview.swift",
             "../../native/Preview.swift",

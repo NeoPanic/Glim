@@ -32,7 +32,7 @@ private final class WorkbookCopyJob {
         guard sqlite3_prepare_v2(connection, sql, -1, &statement, nil) == SQLITE_OK, let statement = statement else { throw CocoaError(.fileReadUnknown) }
         defer { sqlite3_finalize(statement) }
         let lastRow = min(sheet.rows, row + ReaderLimits.SQLITE_PAGE_ROWS)
-        let lastColumn = min(sheet.columns, column + ReaderLimits.SQLITE_COLUMNS)
+        let lastColumn = min(sheet.columns, column + ReaderLimits.SPREADSHEET_COLUMN_WINDOW)
         sqlite3_bind_int64(statement, 1, sqlite3_int64(row)); sqlite3_bind_int64(statement, 2, sqlite3_int64(lastRow))
         var cells: [Int: [Int: String]] = [:]
         func string(_ index: Int32) -> String {
@@ -163,8 +163,8 @@ final class WorkbookPreview: NSObject {
         let cache = cache
         queue.async { [weak self] in
             do {
-                let found = try Self.querySheets(cache: cache, sql: "SELECT id,name,max_row,max_column FROM sheets ORDER BY id LIMIT \(ReaderLimits.SQLITE_TABLES + 1) OFFSET \(offset)")
-                let page = Array(found.prefix(ReaderLimits.SQLITE_TABLES))
+                let found = try Self.querySheets(cache: cache, sql: "SELECT id,name,max_row,max_column FROM sheets ORDER BY id LIMIT \(ReaderLimits.SPREADSHEET_CATALOG_WINDOW + 1) OFFSET \(offset)")
+                let page = Array(found.prefix(ReaderLimits.SPREADSHEET_CATALOG_WINDOW))
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self, !self.closed else { return }
                     let selectedID = self.selected < self.sheets.count ? self.sheets[self.selected].id : nil
@@ -173,7 +173,7 @@ final class WorkbookPreview: NSObject {
                     self.picker.removeAllItems(); self.picker.addItems(withTitles: self.sheets.map { $0.name })
                     if let id = selectedID, let index = self.sheets.firstIndex(where: { $0.id == id }) { self.selected = index; self.picker.selectItem(at: index) }
                     self.catalogOffset = offset + page.count
-                    self.catalogMore = found.count > ReaderLimits.SQLITE_TABLES
+                    self.catalogMore = found.count > ReaderLimits.SPREADSHEET_CATALOG_WINDOW
                     self.busy = false; self.controls()
                     if offset == 0 { self.loadPage() }
                 }
@@ -192,14 +192,14 @@ final class WorkbookPreview: NSObject {
     }
     @objc private func previousPage() { row = max(0, row - ReaderLimits.SQLITE_PAGE_ROWS); loadPage() }
     @objc private func nextPage() { row += ReaderLimits.SQLITE_PAGE_ROWS; loadPage() }
-    @objc private func previousColumnPage() { column = max(0, column - ReaderLimits.SQLITE_COLUMNS); loadPage() }
-    @objc private func nextColumnPage() { column += ReaderLimits.SQLITE_COLUMNS; loadPage() }
+    @objc private func previousColumnPage() { column = max(0, column - ReaderLimits.SPREADSHEET_COLUMN_WINDOW); loadPage() }
+    @objc private func nextColumnPage() { column += ReaderLimits.SPREADSHEET_COLUMN_WINDOW; loadPage() }
     private func controls() {
         picker.isEnabled = !busy && !sheets.isEmpty
         previous.isEnabled = !busy && row > 0
         next.isEnabled = !busy && selected < sheets.count && row + ReaderLimits.SQLITE_PAGE_ROWS < sheets[selected].rows
         previousColumns.isEnabled = !busy && column > 0
-        nextColumns.isEnabled = !busy && selected < sheets.count && column + ReaderLimits.SQLITE_COLUMNS < sheets[selected].columns
+        nextColumns.isEnabled = !busy && selected < sheets.count && column + ReaderLimits.SPREADSHEET_COLUMN_WINDOW < sheets[selected].columns
         if !busy {
             previous.isHidden = row == 0
             next.isHidden = !next.isEnabled
@@ -216,7 +216,7 @@ final class WorkbookPreview: NSObject {
             .replacingOccurrences(of: "%end", with: String(min(sheet.rows, row + ReaderLimits.SQLITE_PAGE_ROWS)))
             .replacingOccurrences(of: "%total", with: String(sheet.rows))
             .replacingOccurrences(of: "%first", with: String(column + 1))
-            .replacingOccurrences(of: "%last", with: String(min(sheet.columns, column + ReaderLimits.SQLITE_COLUMNS)))
+            .replacingOccurrences(of: "%last", with: String(min(sheet.columns, column + ReaderLimits.SPREADSHEET_COLUMN_WINDOW)))
     }
     private func loadPage() {
         cancelCopy()

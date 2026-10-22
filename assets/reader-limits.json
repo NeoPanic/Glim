@@ -488,6 +488,22 @@
         "effect": "unlimited",
         "description": "XLSX cells, sheet names and saved formulas stream into a disk-backed index with paged values; there is no input/sheet/row/column/value/HTML total gate. Legacy XLS and oversized individual XML records use native Quick Look without an application size cap.",
         "description_zh": "XLSX 单元格、工作表名称和已保存公式流式写入磁盘索引，值可分页查看；取消输入、工作表、行列、单元格和 HTML 总量门槛。旧版 XLS 及超出单条 XML 工作预算的情况使用无应用大小门槛的系统原生预览。"
+      },
+      "column_window": {
+        "value": 256,
+        "type": "usize",
+        "unit": "columns",
+        "effect": "page",
+        "description": "Columns per worksheet presentation page, independent of the SQLite browser.",
+        "description_zh": "工作表每个展示页的列数，与 SQLite 浏览器无关。"
+      },
+      "catalog_window": {
+        "value": 5000,
+        "type": "usize",
+        "unit": "items",
+        "effect": "page",
+        "description": "Worksheet catalog entries per page.",
+        "description_zh": "工作表目录每页条目数。"
       }
     },
     "xmind": {
@@ -862,24 +878,24 @@
         "type": "usize",
         "unit": "rows",
         "effect": "page",
-        "description": "Rows per table/schema page; previous/next controls expose all remaining rows.",
-        "description_zh": "表格／结构每页行数，上一页／下一页可访问其余全部行。"
+        "description": "Rows buffered per table/schema page, independent of total table size; a persistent pager provides row counts, page jumps and first/last navigation.",
+        "description_zh": "表格／结构每页缓冲行数，与表总行数无关；常驻分页栏提供行数统计、页码跳转及首页／末页导航。"
       },
       "tables": {
-        "value": 5000,
+        "value": null,
         "type": "usize",
         "unit": "items",
-        "effect": "page",
-        "description": "Catalog/column page size with explicit continuation to the remaining entries.",
-        "description_zh": "目录／列的分页大小，有明确入口继续访问剩余条目。"
+        "effect": "unlimited",
+        "description": "List all tables and views without an application catalog-size cap.",
+        "description_zh": "列出全部表和视图，不设置应用目录条目上限。"
       },
       "columns": {
-        "value": 256,
+        "value": null,
         "type": "usize",
         "unit": "columns",
-        "effect": "page",
-        "description": "Catalog/column page size with explicit continuation to the remaining entries.",
-        "description_zh": "目录／列的分页大小，有明确入口继续访问剩余条目。"
+        "effect": "unlimited",
+        "description": "All SQLite columns are accessible; horizontal virtualization bounds the working set.",
+        "description_zh": "所有 SQLite 列均可访问；通过横向虚拟化限制工作集。"
       },
       "value_bytes": {
         "value": null,
@@ -936,6 +952,14 @@
         "effect": "budget",
         "description": "SQLite page-cache working memory; larger databases read further pages from disk.",
         "description_zh": "SQLite 页缓存工作内存，较大的数据库继续从磁盘读取页面。"
+      },
+      "column_window": {
+        "value": 32,
+        "type": "usize",
+        "unit": "columns",
+        "effect": "page",
+        "description": "Columns fetched per horizontal viewport window, without a total column limit.",
+        "description_zh": "横向视口每次读取的列数，不限制总列数。"
       }
     },
     "markup": {
@@ -1540,6 +1564,58 @@
         "effect": "budget",
         "description": "Zoom-in/out button increment in Word reading view; reset restores 100 percent.",
         "description_zh": "Word 阅读视图缩放按钮的百分比步长；重置恢复 100%。"
+      }
+    },
+    "drawio": {
+      "xml_bytes": {
+        "value": 33554432,
+        "type": "usize",
+        "unit": "bytes",
+        "effect": "budget",
+        "description": "Maximum source or expanded diagram XML per preview; larger documents fall back to source pages.",
+        "description_zh": "预览源文件或解压后单页 XML 的预算；超过预算时回退到源码分页。"
+      },
+      "nesting": {
+        "value": 64,
+        "type": "usize",
+        "unit": "levels",
+        "effect": "budget",
+        "description": "Bound parent traversal and detect cyclic groups.",
+        "description_zh": "限制父级遍历深度并检测循环分组。"
+      },
+      "preview_bytes": {
+        "value": 134217728,
+        "type": "u64",
+        "unit": "bytes",
+        "effect": "budget",
+        "description": "Aggregate encoded PNG page memory; larger documents fall back to source pages.",
+        "description_zh": "所有 PNG 预览页的总编码内存预算；超过时回退到源码分页。"
+      }
+    },
+    "opml": {
+      "xml_bytes": {
+        "value": 16777216,
+        "type": "usize",
+        "unit": "bytes",
+        "effect": "budget",
+        "description": "OPML XML preview budget; fall back to source pages when exceeded.",
+        "description_zh": "OPML XML 预览预算；超过时回退到源码分页。"
+      },
+      "nodes": {
+        "value": 100000,
+        "type": "usize",
+        "unit": "items",
+        "effect": "budget",
+        "description": "Maximum resident outline nodes.",
+        "description_zh": "预览驻留大纲节点预算。"
+      },
+      "nesting": {
+        "value": 256,
+        "type": "usize",
+        "unit": "levels",
+        "effect": "budget",
+        "description": "Maximum outline nesting depth.",
+        "description_zh": "大纲嵌套深度预算。"
       }
     }
   }

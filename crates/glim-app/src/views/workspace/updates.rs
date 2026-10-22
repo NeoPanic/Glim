@@ -163,12 +163,13 @@ impl Workspace {
                     let unchanged = match &content {
                         Content::File(d) => view.tabs[index].snapshot == d.text,
                         Content::Image(d) => view.tabs[index].snapshot == d.fingerprint,
+                        Content::Opml(d) => view.tabs[index].snapshot == d.fingerprint,
                         Content::XMind(d) => view.tabs[index].snapshot == d.fingerprint,
                         Content::Book(d) => view.tabs[index].snapshot == d.fingerprint,
                         Content::Diff(d, _) => view.tabs[index].snapshot == d.patch,
                         Content::Commit(d, _) => view.tabs[index].snapshot == d.text,
                         Content::Page(d) => view.tabs[index].snapshot == d.fingerprint(),
-                        Content::Native(..) => false,
+                        Content::Native(..) | Content::Sqlite(..) => false,
                         Content::Unavailable(_, _) => false,
                     };
                     if unchanged && !view.tabs[index].is_unavailable() {

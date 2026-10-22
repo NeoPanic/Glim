@@ -18,6 +18,23 @@ struct EmbeddedPreviewTests {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
+        // The shared capsule measures visible controls, even after a narrow layout.
+        let short = NSButton(title: "SQL", target: nil, action: nil)
+        let long = NSButton(title: "A deliberately long reader action label", target: nil, action: nil)
+        let stack = NSStackView(views: [short, long])
+        let capsule = FloatingReaderToolbar(items: stack)
+        let fullWidth = capsule.intrinsicContentSize.width
+        capsule.frame = NSRect(x: 0, y: 0, width: 180, height: 72)
+        capsule.layoutSubtreeIfNeeded()
+        precondition(long.frame.width > 180)
+        long.isHidden = true
+        let shortWidth = capsule.intrinsicContentSize.width
+        precondition(shortWidth < fullWidth)
+        short.title = "A much longer SQL action"
+        precondition(capsule.intrinsicContentSize.width > shortWidth)
+        long.isHidden = false
+        precondition(capsule.intrinsicContentSize.width > fullWidth)
+
         let pdfURL = directory.appendingPathComponent("two pages.pdf")
         let document = PDFDocument()
         let image = NSImage(size: NSSize(width: 300, height: 400), flipped: false) { rect in

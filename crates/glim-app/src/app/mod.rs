@@ -8,6 +8,7 @@ pub(crate) mod media_prepare;
 mod menus;
 mod shortcuts;
 pub(crate) mod spreadsheet_prepare;
+pub(crate) mod telemetry;
 #[cfg(feature = "macos-updater")]
 mod updater_bridge;
 pub(crate) mod updates;
@@ -362,6 +363,7 @@ pub fn run() -> Result<()> {
     });
     application.run(move |cx| {
         gpui_kit::init(cx);
+        telemetry::initialize(cx);
         cx.set_quit_mode(QuitMode::Explicit);
         gpui_kit::component::set_locale(glim_services::locale::code());
         cx.set_global(LanguageSaveTask::default());
@@ -374,9 +376,13 @@ pub fn run() -> Result<()> {
         cx.on_app_quit(|cx| {
             log::info!("application quit requested");
             log::logger().flush();
+            let telemetry = telemetry::shutdown(cx);
             let pending = cx.global_mut::<ExplorerSaveTask>().0.take();
             let workspace = cx.global_mut::<WorkspaceSaveTask>().0.take();
             async move {
+                if let Some(telemetry) = telemetry {
+                    telemetry.await;
+                }
                 if let Some(pending) = pending {
                     pending.await;
                 }
@@ -445,6 +451,12 @@ pub fn run() -> Result<()> {
             KeyBinding::new("secondary-b", ToggleSidebar, None),
             KeyBinding::new("secondary-shift-v", TogglePreview, None),
             KeyBinding::new("alt-z", ToggleWordWrap, None),
+            KeyBinding::new("secondary-c", gpui_kit::component::input::Copy, None),
+            KeyBinding::new("ctrl-c", gpui_kit::component::input::Copy, None),
+            KeyBinding::new("ctrl-x", gpui_kit::component::input::Cut, Some("Input")),
+            KeyBinding::new("ctrl-v", gpui_kit::component::input::Paste, Some("Input")),
+            KeyBinding::new("secondary-shift-]", NextTab, None),
+            KeyBinding::new("secondary-shift-[", PreviousTab, None),
             KeyBinding::new("ctrl-tab", NextTab, None),
             KeyBinding::new("ctrl-shift-tab", PreviousTab, None),
             KeyBinding::new("alt-left", NavigateBack, None),

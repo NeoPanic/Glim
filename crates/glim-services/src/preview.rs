@@ -75,7 +75,7 @@ pub fn is_iwork(path: &Path) -> bool {
 /// `.key` is also used by plain-text cryptographic keys. Only document packages
 /// and ZIP containers should be handed to Keynote's Quick Look provider.
 pub fn can_open(path: &Path) -> bool {
-    if !supports(path) && !crate::sqlite::has_header(path) {
+    if !supports(path) {
         return false;
     }
     if path.is_dir() {
@@ -100,8 +100,7 @@ pub fn can_open(path: &Path) -> bool {
 }
 
 pub fn supports(path: &Path) -> bool {
-    crate::sqlite::supports(path)
-        || is_media(path)
+    is_media(path)
         || is_image(path)
         || is_font(path)
         || is_office(path)
@@ -136,7 +135,6 @@ pub struct PreparedPreview {
     pub image_stamp: Option<(u64, Option<std::time::SystemTime>)>,
     pub configuration: Vec<u8>,
     // The native SQLite view must close before its private snapshot is removed.
-    _sqlite: Option<crate::sqlite::Snapshot>,
     _spreadsheet: Option<crate::spreadsheet::Spreadsheet>,
     _word_reading: Option<crate::word_preview::ReadingDocument>,
     _media_directory: Option<tempfile::TempDir>,
@@ -195,11 +193,6 @@ pub fn prepare_cancellable(
     } else {
         Some(tempfile::tempdir()?)
     };
-    let sqlite = if !folder && (crate::sqlite::supports(path) || crate::sqlite::has_header(path)) {
-        Some(crate::sqlite::prepare_cancellable(path, cancel)?)
-    } else {
-        None
-    };
     let spreadsheet = if !folder && crate::spreadsheet::supports(path) {
         crate::spreadsheet::prepare(path, cancel)?
     } else {
@@ -236,8 +229,10 @@ pub fn prepare_cancellable(
         None
     };
     let mut configuration = serde_json::json!({"files": files, "shuffle": shuffle, "autoplay": autoplay, "office": !folder && is_office(path), "font": !folder && is_font(path),
-        "sqlite": spreadsheet.as_ref().map(|s| s.database.as_path()).or_else(|| sqlite.as_ref().and_then(|s| s.database.as_deref())).and_then(|p| p.to_str()),
-        "sqliteInfo": spreadsheet.as_ref().map(|s| &s.information).or_else(|| sqlite.as_ref().map(|s| &s.information))});
+        "sqlite": spreadsheet.as_ref().map(|s| s.database.as_path()).and_then(|p| p.to_str()),
+        "sqliteInfo": spreadsheet.as_ref().map(|s| &s.information)});
+    configuration["wordImagePages"] =
+        serde_json::json!(word_reading.as_ref().is_some_and(|r| r.image_pages));
     configuration["wordReading"] = serde_json::json!(
         word_reading
             .as_ref()
@@ -274,7 +269,6 @@ pub fn prepare_cancellable(
     Ok(PreparedPreview {
         image_stamp,
         configuration: serde_json::to_vec(&configuration)?,
-        _sqlite: sqlite,
         _spreadsheet: spreadsheet,
         _word_reading: word_reading,
         _media_directory: media_directory,

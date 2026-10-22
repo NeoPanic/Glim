@@ -254,3 +254,23 @@ pub fn save_language(language: &str) -> Result<()> {
     file.persist(path)?;
     Ok(())
 }
+
+/// Telemetry defaults to enabled; unreadable preferences fail closed.
+pub fn telemetry_enabled() -> bool {
+    let Ok(directory) = directory() else {
+        return false;
+    };
+    match std::fs::read_to_string(directory.join("telemetry")) {
+        Ok(value) => value.trim() == "true",
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
+pub fn save_telemetry_enabled(enabled: bool) -> Result<()> {
+    let parent = directory()?;
+    std::fs::create_dir_all(&parent)?;
+    let mut file = tempfile::NamedTempFile::new_in(&parent)?;
+    writeln!(file, "{enabled}")?;
+    file.persist(parent.join("telemetry"))?;
+    Ok(())
+}

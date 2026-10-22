@@ -13,7 +13,13 @@ pub(super) fn update(cx: &mut App) {
             disabled: false,
             items: vec![
                 MenuItem::action(tr("About Glim"), About),
-                MenuItem::action(tr("Check for Updates…"), CheckForUpdates),
+                MenuItem::action(
+                    tr(match super::updates::check_label(cx) {
+                        "Check…" => "Check for Updates…",
+                        label => label,
+                    }),
+                    CheckForUpdates,
+                ),
                 MenuItem::separator(),
                 MenuItem::action(tr("Settings…"), OpenSettings),
                 MenuItem::separator(),

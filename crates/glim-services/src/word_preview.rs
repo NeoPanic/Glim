@@ -10,9 +10,12 @@ use std::{
     sync::{Mutex, TryLockError},
 };
 
+mod scans;
+
 static CONVERSION: Mutex<()> = Mutex::new(());
 pub struct ReadingDocument {
     pub html: PathBuf,
+    pub image_pages: bool,
     _directory: tempfile::TempDir,
 }
 pub fn supports(path: &Path) -> bool {
@@ -34,6 +37,19 @@ pub fn prepare(path: &Path, cancel: &Cancellation) -> Result<ReadingDocument> {
     let directory = tempfile::tempdir()?;
     let converted = directory.path().join("converted.html");
     let html = directory.path().join("reading.html");
+    match scans::prepare(path, directory.path(), &html, cancel) {
+        Ok(true) => {
+            return Ok(ReadingDocument {
+                html: std::fs::canonicalize(html)?,
+                image_pages: true,
+                _directory: directory,
+            });
+        }
+        Ok(false) => {}
+        Err(_) => {
+            cancel.check()?;
+        }
+    }
     let mut command = Command::new("/usr/bin/textutil");
     command
         .args(["-convert", "html", "-output"])
@@ -48,6 +64,7 @@ pub fn prepare(path: &Path, cancel: &Cancellation) -> Result<ReadingDocument> {
     );
     decorate(&converted, &html, cancel)?;
     Ok(ReadingDocument {
+        image_pages: false,
         html: std::fs::canonicalize(html)?,
         _directory: directory,
     })
@@ -134,10 +151,20 @@ fn decorate(source: &Path, destination: &Path, cancel: &Cancellation) -> Result<
 :root { color-scheme: light dark; font-size:18px; }
 html { margin:0; padding:0; }
 body { box-sizing:border-box; margin:0!important; padding:24px 32px 104px!important; width:auto!important; max-width:none!important; min-height:100vh; color:CanvasText; background:Canvas; overflow-wrap:anywhere; }
-body p, body li { line-height:1.65!important; }
+body p, body li { line-height:1.45!important; }
 img, svg { max-width:100%; height:auto; }
 table { max-width:100%; border-collapse:collapse; }
-td, th { overflow-wrap:anywhere; }
+td, th { overflow-wrap:normal; }
+/* Imported Word runs often explicitly specify black/gray text. Override those
+   only in dark reading mode, including text on explicitly shaded cells. */
+@media(prefers-color-scheme:dark) {
+  body, body p, body li, body span, body td, body th, body div, body font {
+    color:#e6e6e6!important; background-color:transparent!important;
+  }
+  html, body { background:#202020!important; }
+  body a, body a span { color:#8ab4ff!important; }
+  td, th { border-color:#777!important; }
+}
 @media(max-width:640px) { body { padding:16px 20px 88px!important; } }
 </style>
 "#)?;

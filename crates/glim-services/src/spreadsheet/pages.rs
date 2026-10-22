@@ -395,7 +395,7 @@ pub fn render_page(
         .saturating_add(limits::SQLITE_PAGE_ROWS as u64)
         .min(rows.max(1));
     let column_end = column_start
-        .saturating_add(limits::SQLITE_COLUMNS as u64)
+        .saturating_add(limits::SPREADSHEET_COLUMN_WINDOW as u64)
         .min(columns.max(1));
     ensure!(
         row_start < row_end && column_start < column_end,
@@ -417,7 +417,8 @@ pub fn render_page(
         while let Some(r) = data.next()? {
             cancel.check()?;
             limits::preview_budget(
-                merges.len() < limits::SQLITE_PAGE_ROWS.saturating_mul(limits::SQLITE_COLUMNS),
+                merges.len()
+                    < limits::SQLITE_PAGE_ROWS.saturating_mul(limits::SPREADSHEET_COLUMN_WINDOW),
                 "Worksheet merge layout exceeds active page budget; use Cell data",
             )?;
             let (r1, c1, r2, c2): (u64, u64, u64, u64) =
