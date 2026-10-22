@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="430" viewBox="0 0 960 430" role="img" aria-labelledby="title desc">
 <title id="title">glimapp/glim release download history</title>
-<desc id="desc">Daily observed totals for published GitHub release assets. Tracking began 2026-10-12. Latest: 345 on 2026-10-22. No earlier history is estimated.</desc>
+<desc id="desc">Daily observed totals for published GitHub release assets. Tracking began 2026-10-12. Latest: 371 on 2026-10-23. No earlier history is estimated.</desc>
 <rect x=".5" y=".5" width="959" height="429" rx="16" fill="#0d1117" stroke="#26313c"/>
 <g font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif">
 <text x="32" y="43" fill="#e6edf3" font-size="21" font-weight="650">Release download history</text>
 <text x="32" y="69" fill="#919ba7" font-size="13">glimapp/glim · Daily snapshots · Asia/Shanghai</text>
-<text x="916" y="47" text-anchor="end" fill="#64d9bd" font-size="32" font-weight="700">345</text>
+<text x="916" y="47" text-anchor="end" fill="#64d9bd" font-size="32" font-weight="700">371</text>
 <text x="916" y="70" text-anchor="end" fill="#919ba7" font-size="12">total attachment downloads</text>
 <path d="M78 354H912" stroke="#26313c"/>
 <text x="66" y="358" text-anchor="end" fill="#919ba7" font-size="12">0</text>
@@ -17,13 +17,13 @@
 <text x="66" y="188.5" text-anchor="end" fill="#919ba7" font-size="12">300</text>
 <path d="M78 128H912" stroke="#26313c"/>
 <text x="66" y="132" text-anchor="end" fill="#919ba7" font-size="12">400</text>
-<path d="M78.00 325.75 L161.40 289.59 L244.80 276.03 L328.20 261.34 L411.60 250.04 L495.00 239.31 L578.40 235.35 L661.80 232.53 L745.20 209.36 L828.60 177.16 L912.00 159.07 L912.00 354 L78.00 354Z" fill="#64d9bd" fill-opacity=".08"/>
-<path d="M78.00 325.75 L161.40 289.59 L244.80 276.03 L328.20 261.34 L411.60 250.04 L495.00 239.31 L578.40 235.35 L661.80 232.53 L745.20 209.36 L828.60 177.16 L912.00 159.07" fill="none" stroke="#64d9bd" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M78.00 325.75 L153.82 289.59 L229.64 276.03 L305.45 261.34 L381.27 250.04 L457.09 239.31 L532.91 235.35 L608.73 232.53 L684.55 209.36 L760.36 177.16 L836.18 159.07 L912.00 144.38 L912.00 354 L78.00 354Z" fill="#64d9bd" fill-opacity=".08"/>
+<path d="M78.00 325.75 L153.82 289.59 L229.64 276.03 L305.45 261.34 L381.27 250.04 L457.09 239.31 L532.91 235.35 L608.73 232.53 L684.55 209.36 L760.36 177.16 L836.18 159.07 L912.00 144.38" fill="none" stroke="#64d9bd" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
 <text x="78.00" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-12</text>
-<text x="244.80" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-14</text>
-<text x="495.00" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-17</text>
-<text x="745.20" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-20</text>
-<text x="912.00" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-22</text>
-<circle cx="912.00" cy="159.07" r="9" fill="#64d9bd" fill-opacity=".15"/><circle cx="912.00" cy="159.07" r="4.5" fill="#64d9bd"/>
+<text x="305.45" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-15</text>
+<text x="532.91" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-18</text>
+<text x="684.55" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-20</text>
+<text x="912.00" y="381" text-anchor="middle" fill="#919ba7" font-size="12">2026-10-23</text>
+<circle cx="912.00" cy="144.38" r="9" fill="#64d9bd" fill-opacity=".15"/><circle cx="912.00" cy="144.38" r="4.5" fill="#64d9bd"/>
 <text x="32" y="409" fill="#919ba7" font-size="11">Recorded since 2026-10-12 · All release assets, including checksums · Not unique users or installs</text>
 </g></svg>
