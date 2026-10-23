@@ -6,8 +6,8 @@ use std::path::PathBuf;
 #[serde(rename_all = "snake_case")]
 pub enum UpdateMode {
     Manual,
-    #[default]
     Notify,
+    #[default]
     Automatic,
 }
 

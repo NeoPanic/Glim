@@ -37,7 +37,7 @@ if enabled:
         'SUPublicEDKey': public,
         'SUEnableAutomaticChecks': True,
         'SUScheduledCheckInterval': 86400,
-        'SUAutomaticallyUpdate': False,
+        'SUAutomaticallyUpdate': True,
         'SUEnableSystemProfiling': False,
         'SUVerifyUpdateBeforeExtraction': True,
         'SURequireSignedFeed': True,
