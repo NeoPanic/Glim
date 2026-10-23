@@ -263,12 +263,13 @@ final class ImagePreview: NSObject {
                       let responder = event.window?.firstResponder as? NSView,
                       responder === self.view || responder.isDescendant(of: self.view) else { return event }
                 if let editor = responder as? NSTextView, editor.isEditable { return event }
+                ReaderTelemetry.record(1, 107)
                 self.copySelectionOrImage()
                 return nil
             }
             return event
         }
-        contextMenuRouter = ReaderContextMenu(host: view) { [weak self] _ in
+        contextMenuRouter = ReaderContextMenu(host: view, kind: 1) { [weak self] _ in
             guard let self = self, !self.closed else { return nil }
             let menu = ReaderMenu.make()
             let selectedText = self.hasSelectedImageText
@@ -306,11 +307,12 @@ final class ImagePreview: NSObject {
         return false
     }
     @objc private func copySelectionOrImage() {
+        ReaderTelemetry.record(1, 20)
         cancelImageCopy()
         if #available(macOS 13.0, *), MainActor.assumeIsolated({ (liveText as? LiveImageText)?.copySelection() ?? false }) { return }
         copyImage()
     }
-    @objc private func copyImage() {
+    @objc private func copyImage() { ReaderTelemetry.record(1, 7, 0);
         guard !closed else { return }
         cancelImageCopy()
         let generation = copyGeneration, changeCount = NSPasteboard.general.changeCount
@@ -365,6 +367,7 @@ final class ImagePreview: NSObject {
                 guard let self = self, !self.closed, self.copyGeneration == generation,
                       NSPasteboard.general.changeCount == changeCount else { return }
                 self.copyTask = nil
+                ReaderTelemetry.record(1, 25, result == nil ? 1 : 0)
                 if let data = result {
                     let item = NSPasteboardItem()
                     item.setData(data, forType: type)
@@ -378,7 +381,7 @@ final class ImagePreview: NSObject {
         copyTask = work; Self.copyQueue.async(execute: work)
     }
     private func cancelImageCopy() { copyGeneration += 1; copyTask?.cancel(); copyTask = nil; svgCopyPreview?.close(); svgCopyPreview = nil }
-    @objc private func extractText() {
+    @objc private func extractText() { ReaderTelemetry.record(1, 8, 0);
         guard let parent = view.window,
               let image = imageView.image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
         textExtraction.extract(image, in: parent)
@@ -401,6 +404,7 @@ final class ImagePreview: NSObject {
         requestedMagnification = value; updateZoomLabel()
     }
     @objc private func liveMagnificationEnded(_ notification: Notification) {
+        ReaderTelemetry.record(1, 27, value: ReaderTelemetry.counter(Double(scroll.magnification) * 100))
         fitting = false; requestedMagnification = scroll.magnification; updateZoomLabel()
     }
     private func updateZoomLabel() {
@@ -408,19 +412,19 @@ final class ImagePreview: NSObject {
         zoomLabel.stringValue = String(format: "%.1f%%", Double(scroll.magnification) * 100)
         imageView.window?.invalidateCursorRects(for: imageView)
     }
-    @objc private func zoomOut() { if svgPreview != nil { svgAction("out") } else { changeZoom(1 / sqrt(2)) } }
-    @objc private func zoomIn() { if svgPreview != nil { svgAction("in") } else { changeZoom(sqrt(2)) } }
-    @objc private func fitImage() {
+    @objc private func zoomOut() { ReaderTelemetry.record(1, 2, 0); if svgPreview != nil { svgAction("out") } else { changeZoom(1 / sqrt(2)) } }
+    @objc private func zoomIn() { ReaderTelemetry.record(1, 1, 0); if svgPreview != nil { svgAction("in") } else { changeZoom(sqrt(2)) } }
+    @objc private func fitImage() { ReaderTelemetry.record(1, 4, 0);
         if svgPreview != nil { svgAction("fit"); return }
         fitting = true; needsInitialFit = true; fitWhenReady()
     }
-    @objc private func actualSize() {
+    @objc private func actualSize() { ReaderTelemetry.record(1, 3, 0);
         if svgPreview != nil { svgAction("actual"); return }
         fitting = false; requestedMagnification = 1
         if !original { original = true; load() } else { needsInitialFit = true; fitWhenReady() }
     }
-    @objc private func previousPage() { if page > 0 { page -= 1; load() } }
-    @objc private func nextPage() { if page + 1 < count { page += 1; load() } }
+    @objc private func previousPage() { ReaderTelemetry.record(1, 6, 0); if page > 0 { page -= 1; load() } }
+    @objc private func nextPage() { ReaderTelemetry.record(1, 5, 0); if page + 1 < count { page += 1; load() } }
     private func controls(_ busy: Bool) {
         extractTextButton.isEnabled = !busy && imageView.image != nil
         previous.isEnabled = !busy && page > 0; next.isEnabled = !busy && page + 1 < count

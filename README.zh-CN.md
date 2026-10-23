@@ -1,8 +1,9 @@
-<p align="center"><img src="assets/branding/repository-banner.svg" alt="Glim — Mac 全能文件内容查看器。文档、数据、图片和代码，一个工作空间。免费开源，支持 Apple Silicon 与 Intel。" width="100%" /></p>
+<p align="center"><img src="assets/branding/repository-banner.svg" alt="Glim — 文档、数据和代码，一个 Mac 工作空间。免费开源，支持 Apple Silicon 与 Intel。" width="100%" /></p>
 
-# Glim — Mac 全能文件内容查看器
 
-Glim 是免费开源的 Mac 全能文件内容查看器。Markdown、PDF、图片、JSON、CSV 和源代码，都可以放在同一个工作空间里阅读。
+# Glim — 文档、数据和代码，一个 Mac 工作空间
+
+Glim 是免费开源的 macOS 文件查看器。打开一个项目文件夹，在同一个窗口里阅读 Markdown、PDF、图片、JSON、CSV 和源代码。预览与原文随时切换，检查本地数据，也能顺手修改文本。
 
 <p align="center">免费开源 · macOS · Apple Silicon 与 Intel · <a href="README.md">English</a> / <b>简体中文</b></p>
 
@@ -19,60 +20,62 @@ Glim 是免费开源的 Mac 全能文件内容查看器。Markdown、PDF、图�
   <a href="https://github.com/glimapp/glim/stargazers"><img src="https://img.shields.io/github/stars/glimapp/glim?style=social" alt="GitHub Star 数量" /></a>
 </p>
 
-## 文档、数据和代码，一个工作空间
+## 从一个文件，读到整个目录
 
-<p align="center"><img src="assets/readme/workspace.png" alt="Glim 重新设计的 macOS 工作空间：左侧文件树、多个文档标签、居中的工作空间搜索，以及包含内嵌图示的 12-factor-agents Markdown 文档。" width="100%" /></p>
+<p align="center"><img src="assets/readme/workspace.png" alt="Glim 阅读内嵌 GitHub Star 图表的 Markdown 报告，左侧为项目文件树，顶部同时打开 PNG、Markdown 和 SVG 标签。" width="100%" /></p>
 
-紧凑界面将文档标签与可调整宽度的文件侧栏放在一起，工作空间搜索位于标题栏，预览与源码切换按钮随手可用。截图展示的是公开的 [12-factor-agents](https://github.com/humanlayer/12-factor-agents) 文档；其中的正文与插图属于该项目。
+报告、图表、生成图表的脚本和原始数据库，可以放在同一个工作空间。截图展示 Markdown 报告中的内嵌图表，相邻标签保留相关 PNG 和 SVG 文件。
 
-[下载 Glim](https://github.com/glimapp/glim/releases/latest) · [投票：下一步加什么格式](https://github.com/glimapp/glim/discussions/28) · [提出格式需求](https://github.com/glimapp/glim/issues/new?template=feature_request.yml)
-
-| 想查看什么 | Glim 提供什么 |
+| 要完成的事 | 在 Glim 中 |
 | --- | --- |
-| Markdown 文档 | 阅读 Mermaid 图表、表格和 LaTeX 公式，也可切回源码做小修改 |
-| JSON 数据 | 逐层展开对象和数组，随时切回原文核对 |
-| CSV / TSV 表格 | 按表格阅读，查看多行单元格完整内容，或切回源码 |
-| PDF、图片与 Office 文档 | 在工作空间标签中只读预览；Office 排版取决于 macOS |
-| EPUB 电子书与 SQLite 数据库 | 带书签阅读电子书，或通过只读快照浏览本地数据库表 |
+| 阅读报告与项目说明 | 排版 Markdown 表格、图表和公式，跟随本地链接查看相关文件与图片 |
+| 检查导出数据或 API 响应 | 展开 JSON 对象，按表格阅读 CSV/TSV，查看单元格完整内容 |
+| 查看本地数据库 | 在只读 SQLite 快照中浏览表、筛选和排序记录、检查结构 |
+| 查阅文档与参考资料 | 将 PDF、支持的 Office 文档、图片和电子书保留在工作空间标签中 |
+| 修改错别字或配置值 | 基础编辑 UTF-8 文本，支持撤销重做、自动保存和 ⌘S 显式保存 |
 
-## 支持的文件格式
+### 接着查看报告背后的数据
+
+<p align="center"><img src="assets/readme/sqlite.png" alt="Glim 浏览 SQLite 只读快照，左侧选择数据表，右侧按 drupal 筛选记录，并提供列排序和分页导航。" width="100%" loading="lazy" /></p>
+
+SQLite 通过独立的只读快照打开。选择表或视图，搜索全部记录的所有字段、排序，或双击值查看完整内容；源数据库保持不变。
+
+## 用自己的文件开始
+
+1. **打开文件**（⌘O），或**打开文件夹**（⌘⇧O）。从侧栏浏览相关文件；标题栏搜索按名称或路径查找工作空间文件夹中的文件。
+2. **选择适合内容的视图。** Markdown、HTML 和支持的数据阅读器提供预览／原文切换；文档、图片使用各自的阅读控件。
+3. **需要时做一点修改。** 已有 UTF-8 文件会自动保存。⌘N 创建未命名笔记，第一次 ⌘S 时选择保存位置。
+
+[使用指南](docs/user-guide.zh-CN.md) · [格式与兼容范围](docs/file-format-support.zh-CN.md) · [下载 Glim](https://github.com/glimapp/glim/releases/latest)
+
+## 格式一览
 
 <a href="docs/file-format-support.zh-CN.md">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/readme/formats-dark.svg" />
     <source media="(prefers-color-scheme: light)" srcset="assets/readme/formats.svg" />
-    <img src="assets/readme/formats.svg" alt="Glim 支持的代表文件格式；剑号为基础预览" width="100%" />
+    <img src="assets/readme/formats.svg" alt="Glim 支持的代表文件格式；剑号标记基础预览" width="100%" />
   </picture>
 </a>
 
-*代表格式一览：† 基础预览；具体能力与限制见下表及完整格式文档。*
+*† 基础预览。各阅读器的实际能力见[格式说明](docs/file-format-support.zh-CN.md)。*
 
-| 内容 | 可以做什么 |
+| 内容 | 代表格式 |
 | --- | --- |
-| 文档 | Markdown、静态 HTML、普通 UTF-8 文本、图表与公式 |
-| 原生文档 | PDF、Word、Excel、PowerPoint、Keynote、Pages、Numbers、RTF 只读预览 |
-| 图片 | PNG、JPEG、WebP、GIF 动画、SVG、多页 TIFF、BMP、ICO、ICNS、EXR / HDR |
-| 媒体与工具 | 音视频播放与文件夹队列；字体及字体集合；SQLite 表、结构和关联 WAL 文件 |
-| 思维导图 | XMind 只读预览，支持工作表切换、主题折叠、缩放与详情 |
-| 代码与配置 | Rust、Python、JS/TS、Go、C/C++、Java、Swift、Ruby、INI 等；语法高亮与基础文本编辑 |
-| 数据 | JSON / JSONC、CSV / TSV、YAML、TOML、SQL、GeoJSON 和 Notebook；结构树、表格或文本预览 |
-| AI 模型元数据 | safetensors 张量名称、shape、精度和参数量，仅读取头部 |
-| 探索格式首轮 | AsciiDoc / Org / RST、字幕、TSV / NDJSON / JSON5、D2 / Pikchr / Vega、OBJ / STL、归档目录与部分文本预览等 |
+| 文档与文本 | Markdown、HTML、UTF-8 文本和日志；Markdown 中的图表与公式 |
+| 数据与代码 | JSON/JSONC/JSON5、CSV/TSV、YAML、TOML、XML、SQLite 及带高亮的源代码 |
+| 图片与办公文档 | PNG、JPEG、WebP、GIF、SVG、TIFF、PDF、Word、Excel、PowerPoint 和 iWork |
+| 电子书与思维导图 | EPUB、FB2、CBZ、XMind |
+| 媒体与专用文件 | 系统支持的音视频、字体、safetensors 元数据、归档目录与部分文本预览 |
 
-**平台范围：** Glim 仅维护 Apple Silicon 与 Intel 两种 macOS 架构，共用本文描述的文件阅读器与 Git 工作区。
+### 使用前了解这些行为
 
-<details>
-<summary>格式详情与限制</summary>
+- **编辑与保存：** UTF-8 文本支持基础编辑和保存。表格、数据树、数据库快照、图片和文档预览保持只读；可编辑格式保留原文入口。大文本或超长行使用可编辑分页。
+- **兼容范围：** Office 预览可能与原始排版不同；表格公式显示已保存的值，不重新计算。媒体播放取决于 macOS 编码支持，部分格式提供基础预览或源内容后备。
+- **本地文件与联网内容：** 文件在本地打开。Markdown 可加载远程图片，HTML 预览支持 CSS、JavaScript 和网络资源。可选的匿名使用统计由设置控制，见[使用统计说明](docs/telemetry.zh-CN.md)。
+- **平台与安装：** 支持 macOS Apple Silicon 和 Intel。目前安装包使用临时签名，尚未经过 Apple 公证，首次打开方式见下文。
 
-Markdown 提供 Mermaid（含流程图、子图、Journey、Radar、ZenUML）、Graphviz/DOT、PlantUML（含部分 Salt 与 Chen ER 语法）、flowchart.js、WaveDrom、LaTeX，以及 GFM 表格、任务列表、脚注、GitHub Alerts 和 frontmatter。图表失败时保留源码。
-
-较大或单行很长的文本使用只读分页。阅读器预算及具体影响见[共享阅读器边界](docs/reader-limits.zh-CN.md)。HTML 为静态预览，不执行脚本。归档支持目录及选定格式的文本预览，不提供通用解压或完整内容渲染；非 UTF-8 文本暂不提供文字解码。
-
-Office 排版和音视频编码支持取决于 macOS。XLS/XLSX 显示本地表格及缓存公式值；完整样式、图表和复杂文档可通过默认应用查看。
-
-</details>
-
-[中文文档](docs/README.zh-CN.md) · [完整格式与限制](docs/file-format-support.zh-CN.md) · [未完成计划](docs/TODO.zh-CN.md)
+[完整格式说明](docs/file-format-support.zh-CN.md) · [文档目录](docs/README.zh-CN.md) · [未完成事项](docs/TODO.zh-CN.md)
 
 ## 下载与安装
 

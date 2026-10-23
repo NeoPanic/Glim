@@ -1,10 +1,10 @@
 # 阅读器边界迁移进度
 
-文件总大小不作为拒绝受支持文件的理由；通过流式、分页、按需解码及完整源后备控制工作内存。Git/diff 保持现有实现，后续专项迭代。
+文件总大小不作为拒绝受支持文件的理由；通过流式、分页、按需解码及完整源后备控制工作内存。
 
 ## 配置
 
-唯一入口为 [reader-limits.json](../assets/reader-limits.json)，当前 **34 类、184 项**。效果统计：70 项 unlimited、53 项 budget、33 项 fallback、10 项 page、8 项 timeout、7 项 truncate、3 项 reject。reject/truncate 仅保留在 Git/diff。统计不是实现验证证明。
+唯一入口为 [reader-limits.json](../assets/reader-limits.json)，完整数值、单位及效果见自动生成的双语清单。
 
 全部条目含中文行为说明；生成器生成[英文清单](reader-limits.md)及[中文清单](reader-limits.zh-CN.md)。修改策略后运行 `python3 scripts/generate-reader-limits.py --docs`。
 
@@ -22,7 +22,6 @@
 
 ## 后续范围与验证
 
-- Git/diff 的输出、列表、历史及差异边界留待专项迭代，策略值和实现保持不变。
 - 全部条目已核对双语说明及有限预算消费点；边界回归覆盖工作簿、书籍、地理坐标、张量、可执行文件、QOI 和分页保存等路径。数值清单不能代替行为验证。
 - 大 HTML 通过文件流式浏览器预览，保留可编辑源分页；修改当前页后先保存再预览，WebKit 内部 DOM／脚本分配不由读取缓冲预算约束。
 - 按项目规则，不自动运行本地测试或 UI 冒烟；发布流水线执行工作区回归及双架构构建。实际发布检查结论记录在 GitHub Release，而非在此累积验证日志。
@@ -31,4 +30,4 @@
 
 图片采用预算内缩放预览，并非原分辨率分块解码。ImageIO/WebKit/Quick Look 的内部临时分配、SQLite 表达式求值和 ZIP 中央目录索引仍受平台／库实现约束。ZIP member 按需解码支持 Stored/Deflate，CRC 与长度在解码到末尾时校验。部分索引／报告需准备完成后才能显示首屏。
 
-尚未完成交互式 UI、媒体播放和 Intel 真机验证；不能将编译通过或策略标签当作这些交互已经验证的证据。Git 输出、历史、引用、暂存列表及 diff 边界不在本次迁移范围。
+尚未完成交互式 UI、媒体播放和 Intel 真机验证；不能将编译通过或策略标签当作这些交互已经验证的证据。

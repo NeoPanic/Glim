@@ -14,13 +14,12 @@ impl Workspace {
         }
     }
 
-    pub(crate) fn update_activity(&self, cx: &App) -> UpdateActivity {
+    pub(crate) fn update_activity(&self, _cx: &App) -> UpdateActivity {
         UpdateActivity {
             dirty: self.has_unsaved(),
             saving: self.saving.is_some()
                 || !self.save_queue.is_empty()
                 || self.tabs.iter().any(|r| r.is_persisting_book()),
-            git: self.git_busy || self.has_running_git(cx),
             loading: self.picking
                 || self.loading
                 || self.incoming_file_task.is_some()
@@ -31,8 +30,21 @@ impl Workspace {
     pub(crate) fn update_session(&self, cx: &App) -> WorkspaceSession {
         WorkspaceSession {
             roots: self.roots.clone(),
-            tabs: self.tabs.iter().map(|r| r.session_tab(cx)).collect(),
-            active: self.active,
+            tabs: self
+                .tabs
+                .iter()
+                .filter(|r| r.draft_directory.is_none())
+                .map(|r| r.session_tab(cx))
+                .collect(),
+            active: self
+                .active
+                .filter(|index| self.tabs[*index].draft_directory.is_none())
+                .map(|index| {
+                    self.tabs[..index]
+                        .iter()
+                        .filter(|r| r.draft_directory.is_none())
+                        .count()
+                }),
         }
     }
     pub(crate) fn save_all_for_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -119,9 +131,6 @@ impl Workspace {
                         if let SessionTab::File { preview, .. } = descriptor {
                             reader.set_preview(preview, cx);
                         }
-                        if let SessionTab::Diff { side_by_side, .. } = descriptor {
-                            reader.set_side_by_side(side_by_side);
-                        }
                         reader.set_word_wrap(view.word_wrap, window, cx);
                         view.tabs.push(reader);
                         view.active = Some(view.tabs.len() - 1);
@@ -162,32 +171,12 @@ impl Workspace {
 fn tab_path(tab: &SessionTab) -> std::path::PathBuf {
     match tab {
         SessionTab::File { path, .. } | SessionTab::Playlist { path, .. } => path.clone(),
-        SessionTab::Diff { root, change, .. } => root.join(&change.path),
-        SessionTab::Commit { root, commit, .. } => root.join(format!("Commit {commit}")),
     }
 }
 fn read_session_tab(tab: &SessionTab) -> anyhow::Result<Content> {
     match tab {
         SessionTab::File { path, .. } => read_content(path),
         SessionTab::Playlist { path, shuffle } => Ok(Content::Native(path.clone(), true, *shuffle)),
-        SessionTab::Diff { root, change, .. } => {
-            glim_services::git::read_diff(root, change).map(|d| Content::Diff(d, root.clone()))
-        }
-        SessionTab::Commit { root, commit, file } => {
-            let text = match file {
-                Some(path) => {
-                    glim_services::git::management::commit_file_details(root, commit, path)
-                }
-                None => glim_services::git::management::commit_details(root, commit),
-            }?;
-            Ok(Content::Commit(
-                glim_services::binary::BytePreview {
-                    path: tab_path(tab),
-                    text,
-                },
-                file.clone(),
-            ))
-        }
     }
 }
 

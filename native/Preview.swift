@@ -268,7 +268,7 @@ final class FontPreview: NSObject, NSTextFieldDelegate {
             }
         }
     }
-    @objc func changeFace() {
+    @objc func changeFace() { ReaderTelemetry.record(8, 16, 0);
         let index = selector.indexOfSelectedItem
         guard descriptors.indices.contains(index) else { return }
         let font = CTFontCreateWithFontDescriptor(descriptors[index], 16, nil)
@@ -532,7 +532,7 @@ final class ReaderPDFView: PDFView {
     private var fitsWidth = false
     private var applyingWidth = false
     override func layout() { super.layout(); refitWidth() }
-    @objc func fitToWidth() { fitsWidth = true; autoScales = false; needsLayout = true; refitWidth() }
+    @objc func fitToWidth() { ReaderTelemetry.record(2, 4, 0); fitsWidth = true; autoScales = false; needsLayout = true; refitWidth() }
     @objc private func widthPageChanged() { refitWidth() }
     private func refitWidth() {
         guard fitsWidth, !applyingWidth, let page = currentPage, bounds.width > 0 else { return }
@@ -563,8 +563,8 @@ final class ReaderPDFView: PDFView {
         maxScaleFactor = max(maxScaleFactor, target)
         scaleFactor = target
     }
-    override func zoomIn(_ sender: Any?) { fitsWidth = false; super.zoomIn(sender) }
-    override func zoomOut(_ sender: Any?) { fitsWidth = false; super.zoomOut(sender) }
+    override func zoomIn(_ sender: Any?) { ReaderTelemetry.record(2, 1, 0); fitsWidth = false; super.zoomIn(sender) }
+    override func zoomOut(_ sender: Any?) { ReaderTelemetry.record(2, 2, 0); fitsWidth = false; super.zoomOut(sender) }
     override func magnify(with event: NSEvent) { fitsWidth = false; super.magnify(with: event) }
     private var contextMenuRouter: ReaderContextMenu?
     override func viewDidMoveToWindow() {
@@ -577,7 +577,7 @@ final class ReaderPDFView: PDFView {
         guard window != nil else { return }
         // PDFKit's private document subviews may construct their own menus,
         // bypassing PDFView.menu(for:). Route their context click explicitly.
-        contextMenuRouter = ReaderContextMenu(host: self) { [weak self] event in self?.menu(for: event) }
+        contextMenuRouter = ReaderContextMenu(host: self, kind: 2) { [weak self] event in self?.menu(for: event) }
     }
     deinit { NotificationCenter.default.removeObserver(self) }
 
@@ -604,9 +604,9 @@ final class ReaderPDFView: PDFView {
         add("Previous page", #selector(PDFView.goToPreviousPage(_:)), enabled: canGoToPreviousPage)
         return menu
     }
-    @objc private func fitPage() { fitsWidth = false; autoScales = true }
-    @objc private func actualSize() { fitsWidth = false; autoScales = false; scaleFactor = 1 }
-    @objc private func changeLayout(_ sender: NSMenuItem) {
+    @objc private func fitPage() { ReaderTelemetry.record(2, 4, 0); fitsWidth = false; autoScales = true }
+    @objc private func actualSize() { ReaderTelemetry.record(2, 3, 0); fitsWidth = false; autoScales = false; scaleFactor = 1 }
+    @objc private func changeLayout(_ sender: NSMenuItem) { ReaderTelemetry.record(2, 12, 0);
         if let mode = PDFDisplayMode(rawValue: sender.tag) { displayMode = mode; needsLayout = true; refitWidth() }
     }
 }
@@ -676,8 +676,8 @@ final class PDFSlideshow: NSObject {
         }
         return true
     }
-    @objc private func previous() { pages.goToPreviousPage(nil) }
-    @objc private func next() { pages.goToNextPage(nil) }
+    @objc private func previous() { ReaderTelemetry.record(2, 6); pages.goToPreviousPage(nil) }
+    @objc private func next() { ReaderTelemetry.record(2, 5); pages.goToNextPage(nil) }
     @objc private func updatePosition() {
         if let document = pages.document, let page = pages.currentPage {
             position.stringValue = "\(document.index(for: page) + 1) / \(document.pageCount)"
@@ -743,6 +743,14 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
     var pendingPlayback = false
     var playbackObserver: Any?
     var playbackStateObserver: NSKeyValueObservation?
+    private var telemetryVolumeObserver: NSKeyValueObservation?
+    private var telemetryMuteObserver: NSKeyValueObservation?
+    private var telemetryVolumeWork: DispatchWorkItem?
+    private weak var telemetryMediaItem: AVPlayerItem?
+    private var telemetryMediaTime = 0.0
+    private var telemetryMediaWall = 0.0
+    private var telemetryPositionAt = 0.0
+    private var telemetryGeneration: UInt64?
     let playerView = AVPlayerView()
     let pdfView = ReaderPDFView()
     var pdfSlideshow: PDFSlideshow?
@@ -877,6 +885,7 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         } else {
             playerView.player = player
             playbackObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1.0 / 24.0, preferredTimescale: 600), queue: .main) { [weak self] time in
+                if let self = self { self.observePlayback(time) }
                 guard let self = self, !self.audioBackdrop.isHidden,
                       self.host.window?.occlusionState.contains(.visible) == true,
                       !self.host.isHidden,
@@ -887,9 +896,26 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             }
             playbackStateObserver = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
                 DispatchQueue.main.async {
+                    if self?.closed == false { ReaderTelemetry.record(5, 35, value: UInt64(player.timeControlStatus.rawValue)) }
                     self?.audioBackdrop.playing = player.timeControlStatus == .playing
                     self?.audioBackdrop.needsDisplay = true
                 }
+            }
+            telemetryVolumeObserver = player.observe(\.volume, options: [.new]) { [weak self] _, _ in
+                DispatchQueue.main.async {
+                    guard let self = self, !self.closed else { return }
+                    self.telemetryVolumeWork?.cancel()
+                    let work = DispatchWorkItem { [weak self] in
+                        guard let self = self, !self.closed else { return }
+                        ReaderTelemetry.record(5, 23, value: UInt64(max(0, min(100, self.player.volume * 100))))
+                    }
+                    self.telemetryVolumeWork = work
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+                }
+            }
+            telemetryMuteObserver = player.observe(\.isMuted, options: [.new]) { [weak self] player, _ in
+                guard self?.closed == false else { return }
+                ReaderTelemetry.record(5, 36, value: player.isMuted ? 1 : 0)
             }
             playerView.controlsStyle = .inline
             if let overlay = playerView.contentOverlayView {
@@ -1017,7 +1043,7 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         preview.layoutSubtreeIfNeeded()
         preview.previewItem = url as NSURL
     }
-    @objc private func presentPDF() {
+    @objc private func presentPDF() { ReaderTelemetry.record(2, 13, 0);
         guard !closed, pdfSlideshow == nil, let document = pdfView.document else { return }
         let slideshow = PDFSlideshow(document: document, page: pdfView.currentPage) { [weak self] page in
             guard let self = self else { return }
@@ -1074,10 +1100,10 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             else { preview.keyUp(with: event) }
         }
     }
-    @objc private func presentationPrevious() { navigatePresentation(.previous) }
-    @objc private func presentationNext() { navigatePresentation(.next) }
-    @objc private func exitSlides() { host.stopPresentation() }
-    @objc private func presentSlides() {
+    @objc private func presentationPrevious() { ReaderTelemetry.record(6, 6, 0); navigatePresentation(.previous) }
+    @objc private func presentationNext() { ReaderTelemetry.record(6, 5, 0); navigatePresentation(.next) }
+    @objc private func exitSlides() { ReaderTelemetry.record(6, 14, 0); host.stopPresentation() }
+    @objc private func presentSlides() { ReaderTelemetry.record(6, 13, 0);
         guard !closed else { return }
         host.presentSlides()
     }
@@ -1134,7 +1160,7 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             }
         }
     }
-    @objc func openOfficeExternally(_ sender: NSButton) {
+    @objc func openOfficeExternally(_ sender: NSButton) { ReaderTelemetry.record(6, 11, 0);
         guard let document = urls.first else { return }
         // Resolve again on click: file associations may have changed while open.
         if let application = NSWorkspace.shared.urlForApplication(toOpen: document), !isGlim(application) {
@@ -1291,8 +1317,24 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
         }
     }
 
+    private func observePlayback(_ time: CMTime) {
+        guard !closed, !host.isHidden, let generation = ReaderTelemetry.generation, let item = player.currentItem else { return }
+        if telemetryGeneration != generation { telemetryGeneration = generation; telemetryMediaWall = 0; telemetryPositionAt = 0 }
+        let seconds = time.seconds, now = ProcessInfo.processInfo.systemUptime
+        guard seconds.isFinite, seconds >= 0 else { return }
+        if telemetryMediaItem === item, telemetryMediaWall > 0 {
+            let expected = telemetryMediaTime + (now - telemetryMediaWall) * Double(player.rate)
+            if abs(seconds - expected) > 2 { ReaderTelemetry.record(5, 22, value: ReaderTelemetry.counter(seconds * 1000)) }
+        }
+        telemetryMediaItem = item; telemetryMediaTime = seconds; telemetryMediaWall = now
+        if now - telemetryPositionAt >= 30 {
+            telemetryPositionAt = now
+            let duration = item.duration.seconds
+            ReaderTelemetry.record(5, 34, value: ReaderTelemetry.counter(seconds * 1000), secondary: duration.isFinite && duration >= 0 ? ReaderTelemetry.counter(duration * 1000) : 0)
+        }
+    }
     @objc private func openArtwork() { artworkSnapshot?.open() }
-    func skipFailed(_ item: AVPlayerItem) {
+    func skipFailed(_ item: AVPlayerItem) { ReaderTelemetry.record(5, 0, 1);
         guard player.currentItem === item, failed.insert(urls[index]).inserted else { return }
         detailLabel.stringValue = L("Cannot play this format or codec")
         if index + 1 < urls.count { play(index + 1) }
@@ -1300,9 +1342,9 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
     }
     @objc func playbackFailed(_ note: Notification) { if let item = note.object as? AVPlayerItem { skipFailed(item) } }
     @objc func finished(_ note: Notification) { if let item = note.object as? AVPlayerItem, item === player.currentItem { next() } }
-    @objc func next() { if pdf { pdfView.goToNextPage(nil) } else { play(index + 1) } }
-    @objc func previous() { if pdf { pdfView.goToPreviousPage(nil) } else { play(max(0, index - 1)) } }
-    @objc func togglePlay() { if player.rate == 0 { player.play() } else { player.pause() } }
+    @objc func next() { ReaderTelemetry.record(pdf ? 2 : 5, 5); if pdf { pdfView.goToNextPage(nil) } else { play(index + 1) } }
+    @objc func previous() { ReaderTelemetry.record(pdf ? 2 : 5, 6); if pdf { pdfView.goToPreviousPage(nil) } else { play(max(0, index - 1)) } }
+    @objc func togglePlay() { ReaderTelemetry.record(5, 10, 0); if player.rate == 0 { player.play() } else { player.pause() } }
     @objc func zoomIn() { pdfView.zoomIn(nil) }
     @objc func zoomOut() { pdfView.zoomOut(nil) }
     @objc func fit() { pdfView.fitToWidth() }
@@ -1332,6 +1374,8 @@ final class NativePreviewController: NSObject, NSTableViewDataSource, NSTableVie
             host.updateAccessibility()
         }
         host.removeFromSuperview()
+        telemetryVolumeWork?.cancel(); telemetryVolumeWork = nil
+        telemetryVolumeObserver = nil; telemetryMuteObserver = nil
         metadataAsset?.cancelLoading(); artworkSnapshot = nil; token = nil; playbackStateObserver = nil
         if let observer = playbackObserver { player.removeTimeObserver(observer); playbackObserver = nil }
         player.pause(); player.replaceCurrentItem(with: nil)

@@ -38,7 +38,7 @@ fn sqlite_pages_wal_rows_and_columns_beyond_old_caps_without_source_writes() -> 
     assert_eq!(page.rows.len(), 727 - limits::SQLITE_PAGE_ROWS);
     assert!(!page.more);
     query.page = 0;
-    query.filter = Some((1, "727".into()));
+    query.search = "727".into();
     assert_eq!(db.count(&query, &cancel)?, 1);
     assert_eq!(db.value(&query, 0, 1, 0, &cancel)?.0, "value-727");
     let columns = db.columns("wide", &cancel)?;

@@ -10,7 +10,7 @@ Use [Report a vulnerability](https://github.com/glimapp/glim/security/advisories
 
 Include the affected version and OS, impact, reproduction steps, and a minimal sanitized sample or proof of concept. Do not include credentials or other people's data. Please allow time to investigate before publishing details. This volunteer project does not promise a response deadline or offer a paid bounty.
 
-File parsers, native preview helpers, HTML rendering, and Git command handling are relevant security surfaces. Ordinary crashes without a security impact can use the bug template.
+File parsers, native preview helpers, and HTML rendering are relevant security surfaces. Ordinary crashes without a security impact can use the bug template.
 
 ## Distribution
 

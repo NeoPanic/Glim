@@ -51,7 +51,7 @@ final class ReaderControls {
 private final class ReaderMenuCommand: NSObject {
     let run: () -> Void
     init(_ run: @escaping () -> Void) { self.run = run }
-    @objc func invoke(_ sender: Any?) { run() }
+    @objc func invoke(_ sender: Any?) { ReaderTelemetry.withSource(3, run) }
 }
 
 // Shared policy also strips AppKit-injected Services/Writing Tools entries.
@@ -129,8 +129,9 @@ enum ReaderMenu {
 // Retained by each reader/toolbar; does not hide, replace or snapshot content.
 final class ReaderContextMenu {
     private var monitor: Any?
-    init(host: NSView, provider: @escaping (NSEvent) -> NSMenu?) {
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { [weak host] event in
+    init(host: NSView, kind: Int32 = 0, provider: @escaping (NSEvent) -> NSMenu?) {
+        let scroll = ReaderScrollUsage(kind: kind)
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .scrollWheel]) { [weak host] event in
             guard let host = host, !host.isHiddenOrHasHiddenAncestor, event.window === host.window,
                   let parent = host.superview,
                   let hit = parent.hitTest(parent.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow),
@@ -141,6 +142,8 @@ final class ReaderContextMenu {
                 if view === host { break }
                 ancestor = view.superview
             }
+            if event.type == .scrollWheel { scroll.record(event); return event }
+            ReaderTelemetry.record(kind, 31)
             guard let menu = provider(event) else { return event }
             if !menu.items.isEmpty { NSMenu.popUpContextMenu(menu, with: event, for: host) }
             return nil
@@ -169,11 +172,11 @@ final class ReaderKeyboardShortcuts {
                     return ["fitImage", "increaseZoom"].contains(NSStringFromSelector(action))
                 }) { return event }
                 let action = NSSelectorFromString("copy:")
-                if NSApp.sendAction(action, to: nil, from: responder) { return nil }
+                if NSApp.sendAction(action, to: nil, from: responder) { ReaderTelemetry.record(ReaderTelemetry.kind(controls), 107); return nil }
                 return event
             }
             if modifiers == .command && key == "a" {
-                if NSApp.sendAction(NSSelectorFromString("selectAll:"), to: nil, from: responder) { return nil }
+                if NSApp.sendAction(NSSelectorFromString("selectAll:"), to: nil, from: responder) { ReaderTelemetry.record(ReaderTelemetry.kind(controls), 117); return nil }
                 return event
             }
             if let editor = responder as? NSTextView, editor.isEditable { return event }
@@ -202,10 +205,143 @@ final class ReaderKeyboardShortcuts {
             for entry in controls.entries where !entry.view.isHidden {
                 guard let button = entry.view as? NSButton, button.isEnabled,
                       let action = button.action, actions.contains(NSStringFromSelector(action)) else { continue }
+                ReaderTelemetry.record(ReaderTelemetry.kind(controls), 100 + ReaderTelemetry.action(NSStringFromSelector(action)))
                 button.performClick(nil); return nil
             }
             return event
         }
     }
     deinit { if let monitor = monitor { NSEvent.removeMonitor(monitor) } }
+}
+
+// Numeric-only ABI: document strings, paths and error messages cannot cross it.
+typealias ReaderTelemetryCallback = @convention(c) (Int32, Int32, Int32, Int32, UInt64, UInt64, UInt64, UInt64) -> Void
+private var readerTelemetryCallback: ReaderTelemetryCallback?
+private let readerTelemetryLock = NSLock()
+private var readerTelemetryEnabled = false
+private var readerTelemetryGeneration: UInt64 = 0
+@_cdecl("glim_set_telemetry_enabled")
+func glimSetTelemetryEnabled(_ enabled: Int32) {
+    readerTelemetryLock.lock()
+    readerTelemetryEnabled = enabled != 0
+    readerTelemetryGeneration &+= 1
+    readerTelemetryLock.unlock()
+}
+@_cdecl("glim_set_reader_telemetry")
+func glimSetReaderTelemetry(_ callback: ReaderTelemetryCallback?) {
+    readerTelemetryLock.lock(); readerTelemetryCallback = callback; readerTelemetryLock.unlock()
+}
+enum ReaderTelemetry {
+    // Observability must never trap on malformed native floating-point metadata.
+    static func counter(_ value: Double) -> UInt64 {
+        guard value.isFinite, value > 0 else { return 0 }
+        return UInt64(min(value, Double(UInt64.max / 2)))
+    }
+    static var generation: UInt64? {
+        readerTelemetryLock.lock(); defer { readerTelemetryLock.unlock() }
+        return readerTelemetryEnabled ? readerTelemetryGeneration : nil
+    }
+    static func withSource(_ source: Int32, _ body: () -> Void) {
+        let key = "glim.reader-telemetry-source"
+        let previous = Thread.current.threadDictionary[key]
+        Thread.current.threadDictionary[key] = source
+        defer { Thread.current.threadDictionary[key] = previous }
+        body()
+    }
+    static func record(_ kind: Int32, _ action: Int32, _ error: Int32 = 0,
+                       value: UInt64 = 0, secondary: UInt64 = 0, count: UInt64 = 0, duration: UInt64 = 0) {
+        guard generation != nil else { return }
+        let source: Int32
+        if [Int32(0), 22, 23, 24, 25, 26, 33, 34, 35, 36].contains(action) { source = 0 }
+        else if action == 30 || action == 32 { source = 1 }
+        else if let override = Thread.current.threadDictionary["glim.reader-telemetry-source"] as? Int32 { source = override }
+        else if Thread.isMainThread, let event = NSApp.currentEvent, ProcessInfo.processInfo.systemUptime - event.timestamp < 0.5 {
+            source = event.type == .keyDown ? 2 : [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .scrollWheel].contains(event.type) ? 1 : 0
+        } else { source = 0 }
+        readerTelemetryLock.lock(); let callback = readerTelemetryCallback; readerTelemetryLock.unlock()
+        if action >= 100, Thread.isMainThread, let event = NSApp.currentEvent, event.type == .keyDown {
+            let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+            callback?(kind, action, error, source, UInt64(modifiers.rawValue), UInt64(event.keyCode), count, duration)
+        } else { callback?(kind, action, error, source, value, secondary, count, duration) }
+    }
+    static func fileKind(_ source: URL) -> Int32 {
+        switch source.pathExtension.lowercased() {
+        case "doc", "docx", "rtf", "odt", "pages": return 3
+        case "xls", "xlsx", "xlsm", "ods", "numbers": return 4
+        case "ppt", "pptx", "odp", "key": return 6
+        case "pdf": return 2
+        case "html", "htm", "svg": return 7
+        default: return 0
+        }
+    }
+    static func action(_ selector: String) -> Int32 {
+        switch selector {
+        case "zoomIn", "increaseZoom": return 1
+        case "zoomOut", "decreaseZoom": return 2
+        case "resetZoom", "actualSize": return 3
+        case "fitImage", "fit": return 4
+        case "nextPage", "next": return 5
+        case "previousPage", "previous": return 6
+        case "copyText", "copyImage": return 7
+        case "extractText", "recognizeImages": return 8
+        case "openOfficeExternally:": return 11
+        default: return 0
+        }
+    }
+    static func kind(_ controls: ReaderControls) -> Int32 {
+        let selectors = controls.entries.compactMap { ($0.view as? NSControl)?.action }.map(NSStringFromSelector)
+        if selectors.contains("selectSheet") { return 4 }
+        if selectors.contains("toggleMode") || selectors.contains("increaseZoom") { return 3 }
+        if selectors.contains("fitImage") { return 1 }
+        if selectors.contains("changeFace") { return 8 }
+        if selectors.contains("togglePlay") { return 5 }
+        if selectors.contains("openOfficeExternally:") { return 6 }
+        if selectors.contains("fit") || selectors.contains("fitToWidth") { return 2 }
+        return 0
+    }
+}
+
+// Existing context router observes input without consuming native scrolling.
+// One timer per burst; no file work, per-frame event, or additional event monitor.
+private final class ReaderScrollUsage {
+    private static weak var lastEvent: NSEvent?
+    let kind: Int32
+    var started = ProcessInfo.processInfo.systemUptime
+    var last = ProcessInfo.processInfo.systemUptime
+    var x = 0.0, y = 0.0
+    var count: UInt64 = 0
+    var precise = true
+    var generation: UInt64?
+    var timer: DispatchWorkItem?
+    init(kind: Int32) { self.kind = kind }
+    func record(_ event: NSEvent) {
+        if Self.lastEvent === event { return }
+        Self.lastEvent = event
+        guard let enabledGeneration = ReaderTelemetry.generation else { count = 0; x = 0; y = 0; return }
+        if generation != enabledGeneration { count = 0; x = 0; y = 0; generation = enabledGeneration }
+        let now = ProcessInfo.processInfo.systemUptime
+        if count > 0 && precise != event.hasPreciseScrollingDeltas { flush() }
+        if count == 0 { started = now; precise = event.hasPreciseScrollingDeltas }
+        last = now; count += 1
+        x += abs(event.scrollingDeltaX); y += abs(event.scrollingDeltaY)
+        if timer == nil { schedule() }
+    }
+    private func schedule() {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.timer = nil
+            let now = ProcessInfo.processInfo.systemUptime
+            if now - self.last >= 0.7 || now - self.started >= 10 { self.flush() }
+            else { self.schedule() }
+        }
+        timer = work; DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
+    }
+    private func flush() {
+        guard count > 0, generation == ReaderTelemetry.generation else { count = 0; x = 0; y = 0; return }
+        ReaderTelemetry.record(kind, precise ? 30 : 32, value: ReaderTelemetry.counter((x * 100).rounded()),
+                               secondary: ReaderTelemetry.counter((y * 100).rounded()),
+                               count: count, duration: ReaderTelemetry.counter((last - started) * 1000))
+        count = 0; x = 0; y = 0
+    }
+    deinit { timer?.cancel(); flush() }
 }

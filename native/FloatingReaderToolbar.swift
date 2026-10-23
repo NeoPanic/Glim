@@ -271,7 +271,7 @@ final class FloatingReaderToolbar: NSView {
         host.addSubview(self)
         keyboardShortcuts = ReaderKeyboardShortcuts(host: host, controls: controls)
         if managesContextMenu {
-            contextMenu = ReaderContextMenu(host: host) { [weak self] _ in self?.controls.menu() }
+            contextMenu = ReaderContextMenu(host: host, kind: ReaderTelemetry.kind(controls)) { [weak self] _ in self?.controls.menu() }
         }
         let maximumWidth = widthAnchor.constraint(equalTo: host.widthAnchor, constant: -32)
         NSLayoutConstraint.activate([

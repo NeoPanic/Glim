@@ -125,11 +125,19 @@ impl NativeReader {
         self.hide();
         self.loading_bytes = true;
         let path = self.path.clone();
+        let telemetry_path = path.clone();
+        let telemetry_started = std::time::Instant::now();
         let work = cx
             .background_executor()
             .spawn(async move { glim_services::paged::read_binary_page(&path, 0) });
         self.task = Some(cx.spawn_in(window, async move |view, cx| {
             let result = work.await;
+            glim_services::telemetry::result(
+                "native_load",
+                Some(&telemetry_path),
+                telemetry_started,
+                &result,
+            );
             let _ = view.update_in(cx, |view, _, cx| {
                 view.task = None;
                 view.loading_bytes = false;
@@ -147,7 +155,10 @@ impl NativeReader {
                             reader
                         }))
                     }
-                    Err(error) => view.error = Some(format!("{error:#}")),
+                    Err(error) => {
+                        glim_services::telemetry::operation_failed("native_load", None, &error);
+                        view.error = Some(format!("{error:#}"));
+                    }
                 }
                 cx.notify();
             });
@@ -213,12 +224,20 @@ impl NativeReader {
         let shuffle = self.shuffle;
         let autoplay = self.autoplay;
         let (cancel, guard) = glim_services::work::Cancellation::task();
+        let telemetry_path = path.clone();
+        let telemetry_started = std::time::Instant::now();
         let work = cx.background_executor().spawn(async move {
             glim_services::preview::prepare_cancellable(&path, folder, shuffle, autoplay, &cancel)
         });
         self.task = Some(cx.spawn(async move |view, cx| {
             let _guard = guard;
             let result = work.await;
+            glim_services::telemetry::result(
+                "native_load",
+                Some(&telemetry_path),
+                telemetry_started,
+                &result,
+            );
             let _ = view.update(cx, |v, cx| {
                 v.task = None;
                 match result {
@@ -228,7 +247,10 @@ impl NativeReader {
                         ));
                         v.prepared = Some(prepared);
                     }
-                    Err(e) => v.error = Some(format!("{e:#}")),
+                    Err(e) => {
+                        glim_services::telemetry::operation_failed("native_load", None, &e);
+                        v.error = Some(format!("{e:#}"));
+                    }
                 }
                 cx.notify();
             });

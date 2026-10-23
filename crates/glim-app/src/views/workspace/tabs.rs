@@ -6,6 +6,7 @@ use gpui_kit::{
         button::{Button, ButtonVariants},
         h_flex,
     },
+    prelude::FluentBuilder,
     *,
 };
 
@@ -38,16 +39,12 @@ impl Workspace {
     }
 
     pub(super) fn reveal_active_file(&self, cx: &mut Context<Self>) {
-        if let (Some(explorer), Some(reader)) = (&self.explorer, self.active_reader()) {
-            let path = if let Some(file) = &reader.commit_file {
-                reader
-                    .repository_root
-                    .as_ref()
-                    .map_or_else(|| reader.path.clone(), |root| root.join(file))
-            } else {
-                reader.path.clone()
-            };
-            explorer.update(cx, |explorer, cx| explorer.reveal_path(path, cx));
+        if let (Some(explorer), Some(reader)) = (&self.explorer, self.active_reader())
+            && reader.draft_directory.is_none()
+        {
+            explorer.update(cx, |explorer, cx| {
+                explorer.reveal_path(reader.path.clone(), cx)
+            });
         }
     }
 
@@ -58,6 +55,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if self.tabs.get(index).is_some() {
+            glim_services::telemetry::file_event("tab_activated", &self.tabs[index].path, []);
             log::info!("tab activate file={}", self.tabs[index].path.display());
             self.page = super::Page::Document;
             self.load_task = None;
@@ -66,6 +64,9 @@ impl Workspace {
             self.active = Some(index);
             self.reveal_active_file(cx);
             window.focus(&self.focus, cx);
+            if self.tabs[index].editor().is_some() && self.tabs[index].toggle_label() == "Preview" {
+                self.tabs[index].focus_source(window, cx);
+            }
             self.tab_scroll.scroll_to_item(index);
             window.set_window_title("Glim");
             self.record_history();
@@ -104,9 +105,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if self.is_saving() {
-            self.error = Some(
-                "A save or Git operation is in progress. Please retry after it finishes.".into(),
-            );
+            self.error =
+                Some("A file operation is in progress. Please retry after it finishes.".into());
             cx.notify();
             return;
         }
@@ -115,6 +115,11 @@ impl Workspace {
         self.tabs.retain(|r| {
             let keep = !targets.contains(&super::header::Target::from_reader(r));
             if !keep {
+                glim_services::telemetry::file_event(
+                    "tab_closed",
+                    &r.path,
+                    [("unsaved", glim_services::telemetry::flag(r.is_dirty()))],
+                );
                 r.hide_native(cx);
             }
             keep
@@ -175,7 +180,7 @@ impl Workspace {
             actions.push(Some(TabMenuAction::Close(targets)));
         }
         let reader = &self.tabs[index];
-        if !reader.historical && reader.diff.is_none() {
+        if reader.draft_directory.is_none() {
             items.push((None, true));
             actions.push(None);
             items.push((Some(glim_services::locale::tr("Move to Trash…")), true));
@@ -222,6 +227,14 @@ impl Workspace {
         self.loading = false;
         self.load_incoming_file(window, cx);
         self.active = selection_after_close(self.active, index, self.tabs.len());
+        glim_services::telemetry::file_event(
+            "tab_closed",
+            &self.tabs[index].path,
+            [(
+                "unsaved",
+                glim_services::telemetry::flag(self.tabs[index].is_dirty()),
+            )],
+        );
         self.tabs.remove(index);
         self.observe_autosave(window, cx);
         if let Some(active) = self.active {
@@ -287,28 +300,21 @@ impl Workspace {
             .map(|(index, reader)| {
                 let active = self.active == Some(index);
                 let target = super::header::Target::from_reader(reader);
-                let mut label = reader
-                    .commit_file
-                    .as_ref()
-                    .unwrap_or(&reader.path)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                if reader.commit_file.is_some()
-                    && let Some(oid) = &reader.commit_id
-                {
-                    label.push_str(&format!(" · {}", &oid[..8.min(oid.len())]));
-                }
-                if let Some(diff) = &reader.diff {
-                    label.push_str(&format!(" · {}", diff.scope.label()));
-                }
-                let hint_path = reader
-                    .commit_file
-                    .as_ref()
-                    .unwrap_or(&reader.path)
-                    .display()
-                    .to_string();
+                let label = if reader.draft_directory.is_some() {
+                    reader.title.to_string()
+                } else {
+                    reader
+                        .path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                };
+                let hint_path = if reader.draft_directory.is_some() {
+                    glim_services::locale::tr("Not saved to disk")
+                } else {
+                    reader.path.display().to_string()
+                };
                 let hint_title = label.clone();
                 let hint_bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::default()));
                 let painted_hint_bounds = hint_bounds.clone();
@@ -387,14 +393,19 @@ impl Workspace {
                     .child(
                         h_flex()
                             .gap_2()
-                            .child(crate::views::file_icons::file_icon(&reader.path))
+                            .child(crate::views::file_icons::file_icon(&reader.path, cx))
                             .child(div().max_w(px(210.)).truncate().text_xs().child(label)),
                     )
                     .child(
                         Button::new(("close-tab", index))
                             .ghost()
                             .xsmall()
-                            .label(if reader.is_dirty() { "·" } else { "×" })
+                            .w(px(20.))
+                            .h(px(20.))
+                            .when(reader.is_dirty(), |button| {
+                                button.child(div().size(px(9.)).rounded_full().bg(cx.theme().blue))
+                            })
+                            .when(!reader.is_dirty(), |button| button.label("×"))
                             .text_color(cx.theme().muted_foreground)
                             .tooltip(glim_services::locale::tr(if reader.is_dirty() {
                                 "Unsaved changes · Close"
@@ -403,7 +414,11 @@ impl Workspace {
                             }))
                             .accessibility_label(format!(
                                 "{} {}",
-                                glim_services::locale::tr("Close"),
+                                glim_services::locale::tr(if reader.is_dirty() {
+                                    "Unsaved changes · Close"
+                                } else {
+                                    "Close"
+                                }),
                                 reader.title
                             ))
                             .on_click(cx.listener(move |view, _, window, cx| {

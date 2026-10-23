@@ -2555,7 +2555,7 @@ dependencies = [
 
 [[package]]
 name = "glim-app"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "anyhow",
  "glim-core",
@@ -2572,14 +2572,14 @@ dependencies = [
 
 [[package]]
 name = "glim-core"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "glim-services"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2719,8 +2719,6 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cf698677b253118459f552fe15513858c669d79a25837a94e480db2ae330050"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2805,7 +2803,6 @@ dependencies = [
  "tree-sitter-cmake",
  "tree-sitter-cpp",
  "tree-sitter-css",
- "tree-sitter-diff",
  "tree-sitter-elixir",
  "tree-sitter-embedded-template",
  "tree-sitter-go",
@@ -8324,16 +8321,6 @@ name = "tree-sitter-css"
 version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ad6489794d41350d12a7fbe520e5199f688618f43aace5443980d1ddcf1b29e"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
-name = "tree-sitter-diff"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfe1e5ca280a65dfe5ba4205c1bcc84edf486464fed315db53dee6da9a335889"
 dependencies = [
  "cc",
  "tree-sitter-language",

@@ -13,7 +13,7 @@ Thanks for helping make more files readable. English and Chinese are both welcom
 
 Keep PRs focused. For a substantial feature, discuss the scope in an issue first. See [the roadmap](docs/TODO.md), [architecture](docs/architecture.md), and [build instructions](docs/releasing.md).
 
-The dependency direction is `glim-app → glim-services → glim-core`. Core contains no I/O or GPUI; services contain no UI. Keep filesystem/Git work off rendering paths and retain background task handles. Prefer bounded reads and cancellation for large files.
+The dependency direction is `glim-app → glim-services → glim-core`. Core contains no I/O or GPUI; services contain no UI. Keep filesystem work off rendering paths and retain background task handles. Prefer bounded reads and cancellation for large files.
 
 Use the Rust version pinned in [CI](.github/workflows/ci.yml). Before submitting code changes, run:
 

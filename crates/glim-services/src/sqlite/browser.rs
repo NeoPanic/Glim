@@ -19,7 +19,6 @@ pub struct Query {
     pub columns: Vec<String>,
     pub order: Vec<String>,
     pub search: String,
-    pub filter: Option<(usize, String)>,
     pub sort: Option<(usize, bool)>,
     pub page: usize,
     pub start_column: usize,
@@ -151,16 +150,6 @@ impl Database {
                         )
                     })
                     .collect::<Vec<_>>(),
-            ));
-        }
-        if let Some((index, text)) = &query.filter
-            && let Some(column) = query.columns.get(*index).filter(|_| !text.is_empty())
-        {
-            values.push(text.clone());
-            conditions.push(format!(
-                "instr(lower(CAST({} AS TEXT)), lower(?{})) > 0",
-                quote(column),
-                values.len()
             ));
         }
         (

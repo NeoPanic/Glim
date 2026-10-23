@@ -9,6 +9,217 @@ pub const MAX_DOCUMENT_BYTES: u64 = reader_limits::TEXT_EDITABLE_BYTES;
 
 pub(crate) static SAVE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// A destination snapshot captured after the native save panel confirmed its
+/// name (including macOS's replacement confirmation for an existing file).
+pub struct DraftDestination {
+    selected: std::path::PathBuf,
+    target: std::path::PathBuf,
+    existing: Option<FileStamp>,
+}
+#[derive(PartialEq, Eq)]
+struct FileStamp {
+    device: u64,
+    inode: u64,
+    length: u64,
+    modified: Option<std::time::SystemTime>,
+    digest: [u8; 32],
+}
+fn file_stamp(path: &Path, cancel: &crate::work::Cancellation) -> Result<FileStamp> {
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::MetadataExt;
+    let mut file = File::open(path)?;
+    let metadata = file.metadata()?;
+    ensure!(metadata.is_file(), "Not a regular file");
+    let mut digest = Sha256::new();
+    let mut buffer = vec![0; reader_limits::IO_BUFFER_BYTES];
+    loop {
+        cancel.check()?;
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    let after = file.metadata()?;
+    ensure!(
+        metadata.len() == after.len() && metadata.modified().ok() == after.modified().ok(),
+        "File changed while preparing to save"
+    );
+    Ok(FileStamp {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        length: metadata.len(),
+        modified: metadata.modified().ok(),
+        digest: digest.finalize().into(),
+    })
+}
+/// Recognize binary/container destinations without imposing a text-extension whitelist.
+pub fn is_text_save_path(path: &Path) -> bool {
+    let extension = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(extension.as_str(), "svg" | "fb2") {
+        return true;
+    }
+    !(crate::preview::supports(path)
+        || crate::media::supports(path)
+        || crate::formats::supports(path)
+        || crate::books::supports(path)
+        || crate::xmind::supports(path)
+        || crate::sqlite::supports(path)
+        || matches!(
+            extension.as_str(),
+            "safetensors"
+                | "7z"
+                | "rar"
+                | "dmg"
+                | "iso"
+                | "psd"
+                | "sketch"
+                | "fig"
+                | "bin"
+                | "docm"
+                | "dotx"
+                | "dotm"
+                | "xlsm"
+                | "xlsb"
+                | "xltx"
+                | "xltm"
+                | "pptm"
+                | "ppsx"
+                | "ppsm"
+                | "potx"
+                | "potm"
+                | "msg"
+                | "one"
+                | "tgz"
+                | "tbz"
+                | "tbz2"
+                | "txz"
+                | "zst"
+                | "lz4"
+                | "cab"
+                | "deb"
+                | "rpm"
+                | "pkg"
+                | "ipa"
+                | "apk"
+                | "exe"
+                | "dll"
+                | "dylib"
+                | "so"
+        ))
+}
+pub fn prepare_draft_destination(
+    path: &Path,
+    open_files: &[std::path::PathBuf],
+    cancel: &crate::work::Cancellation,
+) -> Result<DraftDestination> {
+    cancel.check()?;
+    ensure!(
+        is_text_save_path(path),
+        "This note is plain text. Choose .txt, .md or a source-code filename."
+    );
+    let parent = path
+        .parent()
+        .context("File has no parent folder")?
+        .canonicalize()?;
+    let selected = parent.join(path.file_name().context("File has no name")?);
+    let (target, existing) = match std::fs::symlink_metadata(&selected) {
+        Ok(_) => {
+            let target = selected.canonicalize()?;
+            ensure!(
+                !std::fs::metadata(&target)?.permissions().readonly(),
+                "{}",
+                crate::locale::tr("The destination is read-only")
+            );
+            for open in open_files {
+                cancel.check()?;
+                ensure!(
+                    open.canonicalize().ok().as_ref() != Some(&target),
+                    "{}",
+                    crate::locale::tr(
+                        "This file is already open in Glim. Choose another name or close its tab before replacing it."
+                    )
+                );
+            }
+            let stamp = file_stamp(&target, cancel)?;
+            (target, Some(stamp))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (selected.clone(), None),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(DraftDestination {
+        selected,
+        target,
+        existing,
+    })
+}
+/// Publish a draft atomically. Existing targets must still match the prepared
+/// snapshot; a new target uses exclusive publication instead of truncation.
+pub fn save_new_document(
+    destination: &DraftDestination,
+    text: &str,
+    cancel: &crate::work::Cancellation,
+) -> Result<std::path::PathBuf> {
+    let _guard = save_lock(cancel)?;
+    ensure!(!text.contains('\0'), "Text contains a null byte");
+    let parent = destination
+        .target
+        .parent()
+        .context("File has no parent folder")?;
+    let matches = || -> Result<bool> {
+        if let Some(stamp) = &destination.existing {
+            Ok(destination.selected.canonicalize()? == destination.target
+                && file_stamp(&destination.target, cancel)? == *stamp)
+        } else {
+            Ok(true)
+        }
+    };
+    ensure!(
+        matches()?,
+        "{}",
+        crate::locale::tr(
+            "Destination changed. Your note has not been saved; choose its location again."
+        )
+    );
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    cancel.copy(
+        std::io::Cursor::new(text.as_bytes()),
+        temporary.as_file_mut(),
+    )?;
+    if destination.existing.is_some() {
+        let metadata = std::fs::metadata(&destination.target)?;
+        ensure!(
+            !metadata.permissions().readonly(),
+            "{}",
+            crate::locale::tr("The destination is read-only")
+        );
+        temporary
+            .as_file()
+            .set_permissions(metadata.permissions())?;
+    }
+    temporary.as_file().sync_all()?;
+    ensure!(
+        matches()?,
+        "{}",
+        crate::locale::tr("Destination changed while saving. Your note is still open.")
+    );
+    cancel.check()?;
+    if destination.existing.is_some() {
+        temporary
+            .persist(&destination.target)
+            .map_err(|error| error.error)?;
+    } else {
+        temporary
+            .persist_noclobber(&destination.target)
+            .map_err(|error| error.error)?;
+    }
+    Ok(destination.selected.clone())
+}
+
 pub fn read_document(path: &Path) -> Result<Document> {
     ensure!(path.is_file(), "Not a regular file: {}", path.display());
     let file = File::open(path).with_context(|| format!("Cannot open {}", path.display()))?;
@@ -130,6 +341,48 @@ fn matches_disk(path: &Path, expected: &str, cancel: &crate::work::Cancellation)
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn draft_replacement_preserves_original_on_conflict_and_rejects_open_targets() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("note.txt");
+        let cancel = crate::work::Cancellation::default();
+        let destination = prepare_draft_destination(&path, &[], &cancel)?;
+        save_new_document(&destination, "first", &cancel)?;
+        let destination = prepare_draft_destination(&path, &[], &cancel)?;
+        fs::write(&path, "external edit")?;
+        assert!(save_new_document(&destination, "replacement", &cancel).is_err());
+        assert_eq!(fs::read_to_string(&path)?, "external edit");
+        assert!(prepare_draft_destination(&path, std::slice::from_ref(&path), &cancel).is_err());
+        let destination = prepare_draft_destination(&path, &[], &cancel)?;
+        save_new_document(&destination, "confirmed replacement", &cancel)?;
+        assert_eq!(fs::read_to_string(&path)?, "confirmed replacement");
+        Ok(())
+    }
+    #[test]
+    fn draft_destinations_accept_text_and_do_not_masquerade_as_binary_documents() {
+        for name in [
+            "note.txt",
+            "README.md",
+            "main.rs",
+            "Makefile",
+            ".env",
+            "new.custom-text",
+            "shape.svg",
+        ] {
+            assert!(is_text_save_path(Path::new(name)), "{name}");
+        }
+        for name in [
+            "note.docx",
+            "slides.pptx",
+            "note.pdf",
+            "photo.png",
+            "archive.zip",
+            "data.sqlite",
+        ] {
+            assert!(!is_text_save_path(Path::new(name)), "{name}");
+        }
+    }
 
     #[test]
     fn saving_preserves_text_and_rejects_external_changes_or_deletion() -> Result<()> {

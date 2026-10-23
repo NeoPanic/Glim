@@ -93,6 +93,28 @@ impl CsvTable {
         self.load_page(cx);
     }
     fn load_page(&mut self, cx: &mut Context<Self>) {
+        glim_services::telemetry::track(
+            "csv_page_requested",
+            [
+                (
+                    "row_offset",
+                    glim_services::telemetry::number(self.row_start as u64),
+                ),
+                (
+                    "column_offset",
+                    glim_services::telemetry::number(self.column_start as u64),
+                ),
+                (
+                    "format",
+                    glim_services::telemetry::text(match self.format {
+                        "CSV" => "csv",
+                        "TSV" => "tsv",
+                        "GeoJSON" => "geojson",
+                        _ => "table",
+                    }),
+                ),
+            ],
+        );
         let Some(source) = self.source.clone() else {
             return;
         };
@@ -102,6 +124,7 @@ impl CsvTable {
         self.more = false;
         let (delimiter, row, column) = (self.delimiter, self.row_start, self.column_start);
         let (cancel, guard) = glim_services::work::Cancellation::task();
+        let telemetry_started = std::time::Instant::now();
         let work = cx.background_executor().spawn(async move {
             match source {
                 Source::GeoText(text) => {
@@ -125,6 +148,7 @@ impl CsvTable {
         self.task = Some(cx.spawn(async move |view, cx| {
             let _guard = guard;
             let result = work.await;
+            glim_services::telemetry::result("csv_load", None, telemetry_started, &result);
             let _ = view.update(cx, |view, cx| {
                 view.task = None;
                 match result {
@@ -145,6 +169,7 @@ impl CsvTable {
         cx.notify();
     }
     fn show_cell(&self, row: usize, column: usize, window: &mut Window, cx: &mut Context<Self>) {
+        glim_services::telemetry::reader_feature("csv", "cell_detail", []);
         let Some(value) = self.rows.get(row).and_then(|row| row.get(column)).cloned() else {
             return;
         };
@@ -244,21 +269,21 @@ impl Render for CsvTable {
                 .when(!self.previous.is_empty() || self.more, |bar| bar
                 .child(Button::new("csv-prev").label(glim_services::locale::tr("Previous"))
                     .disabled(busy || self.previous.is_empty()).on_click(cx.listener(|view, _, _, cx| {
-                        if let Some(start) = view.previous.pop() { view.row_start = start; view.load_page(cx); }
+                        glim_services::telemetry::reader_feature("csv", "previous_rows", []); if let Some(start) = view.previous.pop() { view.row_start = start; view.load_page(cx); }
                     })))
                 .child(Button::new("csv-next").label(glim_services::locale::tr("Next page"))
                     .disabled(busy || !self.more).on_click(cx.listener(|view, _, _, cx| {
-                        view.previous.push(view.row_start); view.row_start += view.rows.len(); view.load_page(cx);
+                        glim_services::telemetry::reader_feature("csv", "next_rows", []); view.previous.push(view.row_start); view.row_start += view.rows.len(); view.load_page(cx);
                     })))
                 )
                 .when(self.column_start > 0 || self.column_start + columns < self.columns, |bar| bar
                 .child(Button::new("csv-prev-cols").label(glim_services::locale::tr("Previous columns"))
                     .disabled(busy || self.column_start == 0).on_click(cx.listener(|view, _, _, cx| {
-                        view.column_start = view.column_start.saturating_sub(reader_limits::CSV_COLUMNS); view.load_page(cx);
+                        glim_services::telemetry::reader_feature("csv", "previous_columns", []); view.column_start = view.column_start.saturating_sub(reader_limits::CSV_COLUMNS); view.load_page(cx);
                     })))
                 .child(Button::new("csv-next-cols").label(glim_services::locale::tr("Next columns"))
                     .disabled(busy || self.column_start + columns >= self.columns).on_click(cx.listener(|view, _, _, cx| {
-                        view.column_start += reader_limits::CSV_COLUMNS; view.load_page(cx);
+                        glim_services::telemetry::reader_feature("csv", "next_columns", []); view.column_start += reader_limits::CSV_COLUMNS; view.load_page(cx);
                     })))), cx)).into_any_element()
     }
 }

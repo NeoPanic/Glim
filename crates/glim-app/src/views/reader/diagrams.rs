@@ -203,6 +203,30 @@ impl PreviewStore {
         if !self.pending.remove(&diagram) {
             return;
         }
+        let kind = match diagram.kind.as_str() {
+            "mermaid" => "mermaid",
+            "dot" | "graphviz" => "graphviz",
+            "d2" => "d2",
+            "plantuml" | "puml" => "plantuml",
+            "pikchr" => "pikchr",
+            "vega" | "vega-lite" => "vega",
+            "wavedrom" => "wavedrom",
+            _ => "other",
+        };
+        glim_services::telemetry::track(
+            "diagram_render",
+            [
+                ("diagram_kind", glim_services::telemetry::text(kind)),
+                ("success", glim_services::telemetry::flag(result.is_ok())),
+            ],
+        );
+        if let Err(error) = &result {
+            glim_services::telemetry::operation_failed(
+                "diagram_render",
+                None,
+                &anyhow::anyhow!(error.clone()),
+            );
+        }
         let cost = diagram
             .source
             .len()

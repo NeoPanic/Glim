@@ -182,18 +182,18 @@ final class WorkbookPreview: NSObject {
             }
         }
     }
-    @objc private func loadMoreSheets() {
+    @objc private func loadMoreSheets() { ReaderTelemetry.record(4, 21);
         guard !busy, catalogMore else { return }
         busy = true; controls(); loadCatalog(offset: catalogOffset)
     }
-    @objc private func selectSheet() {
+    @objc private func selectSheet() { ReaderTelemetry.record(4, 15, 0);
         guard picker.indexOfSelectedItem >= 0 else { return }
         selected = picker.indexOfSelectedItem; row = 0; column = 0; loadPage()
     }
-    @objc private func previousPage() { row = max(0, row - ReaderLimits.SQLITE_PAGE_ROWS); loadPage() }
-    @objc private func nextPage() { row += ReaderLimits.SQLITE_PAGE_ROWS; loadPage() }
-    @objc private func previousColumnPage() { column = max(0, column - ReaderLimits.SPREADSHEET_COLUMN_WINDOW); loadPage() }
-    @objc private func nextColumnPage() { column += ReaderLimits.SPREADSHEET_COLUMN_WINDOW; loadPage() }
+    @objc private func previousPage() { ReaderTelemetry.record(4, 6, 0); row = max(0, row - ReaderLimits.SQLITE_PAGE_ROWS); loadPage() }
+    @objc private func nextPage() { ReaderTelemetry.record(4, 5, 0); row += ReaderLimits.SQLITE_PAGE_ROWS; loadPage() }
+    @objc private func previousColumnPage() { ReaderTelemetry.record(4, 18, 0); column = max(0, column - ReaderLimits.SPREADSHEET_COLUMN_WINDOW); loadPage() }
+    @objc private func nextColumnPage() { ReaderTelemetry.record(4, 19, 0); column += ReaderLimits.SPREADSHEET_COLUMN_WINDOW; loadPage() }
     private func controls() {
         picker.isEnabled = !busy && !sheets.isEmpty
         previous.isEnabled = !busy && row > 0
@@ -277,7 +277,7 @@ final class WorkbookPreview: NSObject {
             }
         }
     }
-    private func fail(_ message: String) {
+    private func fail(_ message: String) { ReaderTelemetry.record(4, 0, 1);
         DispatchQueue.main.async { [weak self] in
             guard let self = self, !self.closed else { return }
             self.busy = false; self.loading.isHidden = false; self.loading.stringValue = message; self.controls()

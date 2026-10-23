@@ -296,27 +296,6 @@
 | --- | ---: | --- | --- | --- |
 | `geo.points` | 10,000 | items | 分页，可继续访问 | 每页坐标数量；上一页／下一页可访问全部 GPX/KML 点，源码保留完整 XML。 |
 
-## git
-
-| Key | 当前值 | 单位 | 超限效果 | 实际行为 |
-| --- | ---: | --- | --- | --- |
-| `git.output_bytes` | 8 MiB | bytes | 拒绝该操作或视图 | Git 专项待处理：output bytes；本次保留原有数值和行为。 |
-| `git.diff_output_bytes` | 256 MiB | bytes | 拒绝该操作或视图 | Git 专项待处理：diff output bytes；本次保留原有数值和行为。 |
-| `git.stderr_bytes` | 64 KiB | bytes | 截取显示 | Git 专项待处理：stderr bytes；本次保留原有数值和行为。 |
-| `git.error_chars` | 16,384 | characters | 截取显示 | Git 专项待处理：error chars；本次保留原有数值和行为。 |
-| `git.history_commits` | 1,000 | items | 拒绝该操作或视图 | Git 专项待处理：history commits；本次保留原有数值和行为。 |
-| `git.history_batch` | 200 | items | 处理／内存预算 | Git 专项待处理：history batch；本次保留原有数值和行为。 |
-| `git.stashes` | 100 | items | 截取显示 | Git 专项待处理：stashes；本次保留原有数值和行为。 |
-| `git.refs` | 1,000 | items | 截取显示 | Git 专项待处理：refs；本次保留原有数值和行为。 |
-
-## diff
-
-| Key | 当前值 | 单位 | 超限效果 | 实际行为 |
-| --- | ---: | --- | --- | --- |
-| `diff.preview_bytes` | 16 MiB | bytes | 截取显示 | Diff 专项待处理：preview bytes；本次保留原有数值和行为。 |
-| `diff.lines` | 50,000 | items | 截取显示 | Diff 专项待处理：lines；本次保留原有数值和行为。 |
-| `diff.line_bytes` | 64 KiB | bytes | 截取显示 | Diff 专项待处理：line bytes；本次保留原有数值和行为。 |
-
 ## workspace
 
 | Key | 当前值 | 单位 | 超限效果 | 实际行为 |

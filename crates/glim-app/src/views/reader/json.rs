@@ -42,11 +42,13 @@ impl JsonTree {
         self.expanded.clear();
         self.error = None;
         self.scroll = UniformListScrollHandle::new();
+        let telemetry_started = std::time::Instant::now();
         let work = cx
             .background_executor()
             .spawn(async move { glim_services::json::parse_format(&text, &format) });
         self.task = Some(cx.spawn(async move |view, cx| {
             let result = work.await;
+            glim_services::telemetry::result("data_tree_load", None, telemetry_started, &result);
             let _ = view.update(cx, |v, cx| {
                 v.task = None;
                 match result {
@@ -151,6 +153,11 @@ impl Render for JsonTree {
                                     .pr_3()
                                     .text_sm()
                                     .on_double_click(cx.listener(move |view, _, window, cx| {
+                                        glim_services::telemetry::reader_feature(
+                                            "data_tree",
+                                            "value_detail",
+                                            [],
+                                        );
                                         if let Some(node) = view.nodes.get(index) {
                                             let text = node.full_value.as_ref().map_or_else(
                                                 || node.full_key.clone(),
@@ -190,6 +197,16 @@ impl Render for JsonTree {
                                     )
                                     .on_click(cx.listener(move |v, _, _, cx| {
                                         if expandable {
+                                            glim_services::telemetry::reader_feature(
+                                                "data_tree",
+                                                "toggle_node",
+                                                [(
+                                                    "expanded",
+                                                    glim_services::telemetry::flag(
+                                                        !v.expanded.contains(&index),
+                                                    ),
+                                                )],
+                                            );
                                             if !v.expanded.remove(&index) {
                                                 v.expanded.insert(index);
                                             }

@@ -116,6 +116,18 @@ impl log::Log for Logger {
     }
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
+            if record.level() == log::Level::Error {
+                let context = CONTEXT.with(|context| context.borrow().clone());
+                crate::telemetry::logged_error(
+                    record.target(),
+                    record.file(),
+                    record.line(),
+                    &record.args().to_string(),
+                    context
+                        .as_ref()
+                        .map(|(path, phase)| (path.as_path(), *phase)),
+                );
+            }
             event(
                 record.level().as_str(),
                 &format!("{} {}", record.target(), record.args()),
@@ -171,12 +183,22 @@ pub fn initialize() -> io::Result<()> {
                 });
             }
         }
+        let backtrace = Backtrace::force_capture().to_string();
+        crate::telemetry::panic_event(
+            info.location()
+                .map(|location| (location.file(), location.line())),
+            &summary,
+            context
+                .as_ref()
+                .map(|(path, phase)| (path.as_path(), *phase)),
+            &backtrace,
+        );
         enqueue(
             format!(
                 "PANIC thread={:?} name={:?} context={context:?}\n{summary}\n{}",
                 std::thread::current().id(),
                 std::thread::current().name(),
-                Backtrace::force_capture()
+                backtrace
             ),
             true,
         );

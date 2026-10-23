@@ -2,7 +2,7 @@
 
 **English** · [简体中文](file-format-support.zh-CN.md) · [Home](../README.md)
 
-A focused file viewer for macOS.
+Documents, data and code share one macOS reading workspace. For opening files, saving edits and resuming work, see the [user guide](user-guide.md).
 
 Support means the behavior listed below, not full compatibility with every feature of a format. Files open in workspace tabs. The supported targets are macOS Apple Silicon and Intel; the table describes capabilities on those two architectures.
 
@@ -30,7 +30,6 @@ Support means the behavior listed below, not full compatibility with every featu
 | TTF/OTF/TTC/OTC/DFONT — macOS | CoreText font/collection inspection, glyphs and custom samples; fonts are not installed |
 | DB/DB3/SQLite/SQLite3 and recognized SQLite headers — macOS | Read-only temporary snapshot; tables/views, schema, SQL definitions and paged records. Associated WAL/SHM/journal files resolve to the main database when available |
 | safetensors | Tensor names, shapes, dtypes, parameter counts and metadata from the header; weights are not loaded or executed |
-| `.diff`/`.patch`, working/staged changes and commit history | Read-only diffs, inline/side-by-side modes, explicit staging/unstaging and staged-only commits |
 | Binary dotfiles such as `.DS_Store` | Bounded hexadecimal/ASCII preview; no semantic decoding or editing |
 
 A `.key` text file can be a cryptographic key: only ZIP containers and document packages enter the Keynote reader. File associations are based on extension/type and can affect both uses.
@@ -72,21 +71,17 @@ Salt and Chen ER are partial adapters, not complete PlantUML dialects. Unsupport
 
 ## Shared reader boundaries
 
-Application thresholds are managed in [assets/reader-limits.json](../assets/reader-limits.json). The [generated inventory](reader-limits.md) lists every configured value, unit and effect. Rust, native Swift and diagram JavaScript consume that one policy. Fixed input caps, truncation, paging thresholds, preview dimensions and working-memory/time budgets remain separate concepts; non-Git total-file caps are replaced by streaming, paging or complete source fallback; Git/diff boundaries remain deferred.
+Application thresholds are managed in [assets/reader-limits.json](../assets/reader-limits.json). The [generated inventory](reader-limits.md) lists every configured value, unit and effect. Rust, native Swift and diagram JavaScript consume that one policy. Fixed input caps, truncation, paging thresholds, preview dimensions and working-memory/time budgets remain separate concepts; total-file caps are replaced by streaming, paging or complete source fallback.
 
-Preview limits do not truncate source files or staged contents. Non-UTF-8 ordinary text is not currently decoded. Office previews do not edit, run macros or recalculate formulas.
+Preview limits do not truncate source files. Non-UTF-8 ordinary text is not currently decoded. Office previews do not edit, run macros or recalculate formulas.
 
 SQLite copies the main database, WAL and rollback journal into a private snapshot and checks source stability. It does not checkpoint the original. Encrypted databases and arbitrary write SQL are unsupported.
 
 MKV supports H.264/AAC-LC remuxing, including AVC configuration and Annex-B frames. Compressed/encrypted tracks, codec delay and duplicate-timestamp lacing remain unsupported. Original files and display names are preserved; temporary media is released with the native reader. Folder playlists enumerate direct children and skip unsupported items; restored playback is paused.
 
-## Maintenance
+## Reader details
 
-`cargo run -p glim-services --example audit_formats --locked -- /path/to/project` samples an explicit format allowlist and prints counts, not private paths or file contents. It is not an exhaustive support audit or a UI test.
-
-See [architecture](architecture.md), [build and release](releasing.md) and [roadmap](TODO.md).
-
-Markdown remote images load over HTTP(S) in the background, using the shared response and timeout budgets. Failed downloads or decoding show a visible placeholder. Common picture light/dark candidates follow the theme; unknown media conditions retain the img fallback. SVG does not run scripts or read external resources. Relative local images retain existing path resolution. System curl is required for this Markdown image path. HTML previews use WebKit networking and layout instead.
+Markdown remote images load over HTTP(S) in the background, using the shared response and timeout budgets. Failed downloads or decoding show a visible placeholder. Common picture light/dark candidates follow the theme; unknown media conditions retain the img fallback. SVG does not run scripts or read external resources. Standard external SVG document type declarations are discarded; internal DTD subsets remain unsupported. Relative local images retain existing path resolution. System curl is required for this Markdown image path. HTML previews use WebKit networking and layout instead.
 
 Mach-O (including universal), ELF and PE files are recognized by their headers and inspected read-only. The preview shows architecture, word size, byte order, entry point, segments/sections, available dependency names and a hexadecimal excerpt. Metadata working budgets use the shared policy. Programs are never executed or decompiled; malformed inputs report errors; metadata working-budget exhaustion retains complete hex pages, and dependencies are shown only where the corresponding headers can be parsed.
 
@@ -100,4 +95,10 @@ PDF also offers **Play Slideshow**, using PDFKit single-page full-screen display
 
 Raster image previews offer **Extract Text** in the floating toolbar. Apple Vision recognizes the current image page locally; a separate result window supports selecting/copying text and Copy All. Recognition uses the current decoded preview: use Actual size first for small text in large images. OCR is approximate, produces plain text, and is not available in SVG previews.
 
-Office/iWork and PDF toolbars offer **Copy Preview Text** and **Recognize Image Text**. Word and PDF prefer selected text, then loaded reading/current-page text. Other native previews copy the text exposed by the current system provider, including cell values; output is plain text and table formatting is provider-dependent. PDF OCR recognizes the current page. OOXML/iWork embedded images are recognized one supported raster at a time, with Next image and Copy All in the result window. Legacy binary Office embedded images and vector resources are not decoded by this extraction path. Word and Excel expose one preview, without separate Reading/Original Layout or Preview/Cell data selectors.
+Office/iWork and PDF toolbars offer **Copy Preview Text** and **Recognize Image Text**. Word and PDF prefer selected text, then loaded reading/current-page text. Other native previews copy the text exposed by the current system provider, including cell values; output is plain text and table formatting is provider-dependent. PDF OCR recognizes the current page. OOXML/iWork embedded images are recognized one supported raster at a time, with Next image and Copy All in the result window. Legacy binary Office embedded images and vector resources are not decoded by this extraction path. Word offers Reading mode / Original layout switching. Excel uses a single paged preview without a separate cell-data mode.
+
+## Maintenance
+
+`cargo run -p glim-services --example audit_formats --locked -- /path/to/project` samples an explicit format allowlist and prints counts, not private paths or file contents. It is not an exhaustive support audit or a UI test.
+
+See [architecture](architecture.md), [build and release](releasing.md) and [roadmap](TODO.md).

@@ -10,7 +10,6 @@ use gpui_kit::{
     component::{
         ActiveTheme, FocusableExt, Icon,
         button::{Button, ButtonCustomVariant, ButtonVariants},
-        menu::{PopupMenu, PopupMenuItem},
     },
     prelude::FluentBuilder,
     *,
@@ -19,6 +18,7 @@ use gpui_kit::{
 pub enum ExplorerEvent {
     SelectionChanged,
     OpenFile(PathBuf),
+    NewFile(PathBuf),
     RemoveFolder(u64),
     TrashEntry(PathBuf),
     PlayFolder(PathBuf, bool),
@@ -50,6 +50,7 @@ impl Row {
 
 #[derive(Clone, Copy)]
 enum FileMenuAction {
+    NewFile,
     Play(bool),
     Open,
     Reveal,
@@ -730,7 +731,7 @@ impl Explorer {
                                             .text_color(cx.theme().muted_foreground)
                                             .into_any_element()
                                         } else {
-                                            super::file_icons::file_icon(&row.entry.path)
+                                            super::file_icons::file_icon(&row.entry.path, cx)
                                                 .into_any_element()
                                         }),
                                 )
@@ -830,6 +831,9 @@ impl Explorer {
     ) {
         use FileMenuAction::*;
         let mut items = Vec::new();
+        if is_dir {
+            items.extend([(Some("New File"), Some(NewFile)), (None, None)]);
+        }
         if is_dir && self.media_presence.get(&path).copied() == Some(true) {
             items.extend([
                 (Some("Play in Order"), Some(Play(false))),
@@ -868,7 +872,27 @@ impl Explorer {
                     .and_then(|index| items.get(index))
                     .and_then(|(_, action)| *action)
                 {
+                    let action_name = match action {
+                        NewFile => "new_file",
+                        Play(true) => "play_folder_shuffle",
+                        Play(false) => "play_folder",
+                        Open => "open",
+                        Reveal => "reveal_in_finder",
+                        CopyRelative => "copy_relative_path",
+                        CopyAbsolute => "copy_absolute_path",
+                        Trash => "trash",
+                        RemoveFolder(_) => "remove_folder",
+                    };
+                    glim_services::telemetry::file_event(
+                        "explorer_action",
+                        &path,
+                        [
+                            ("action", glim_services::telemetry::text(action_name)),
+                            ("is_directory", glim_services::telemetry::flag(is_dir)),
+                        ],
+                    );
                     match action {
+                        NewFile => cx.emit(ExplorerEvent::NewFile(path.clone())),
                         Play(shuffle) => cx.emit(ExplorerEvent::PlayFolder(path.clone(), shuffle)),
                         Open => cx.emit(ExplorerEvent::OpenFile(path.clone())),
                         Reveal => cx.reveal_path(&path),
@@ -1064,37 +1088,6 @@ impl Render for Explorer {
                 .size_full(),
             )
     }
-}
-
-/// Menu actions operate on the row's path, independent of the open document.
-pub(super) fn path_menu(
-    menu: PopupMenu,
-    path: &std::path::Path,
-    root: &std::path::Path,
-) -> PopupMenu {
-    let reveal = path.to_path_buf();
-    let relative = path.strip_prefix(root).unwrap_or(path);
-    let relative = if relative.as_os_str().is_empty() {
-        ".".to_owned()
-    } else {
-        relative.to_string_lossy().into_owned()
-    };
-    let absolute = path.to_string_lossy().into_owned();
-    menu.item(
-        PopupMenuItem::new(glim_services::locale::tr("Reveal in Finder"))
-            .on_click(move |_, _, cx| cx.reveal_path(&reveal)),
-    )
-    .separator()
-    .item(
-        PopupMenuItem::new(glim_services::locale::tr("Copy Relative Path")).on_click(
-            move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(relative.clone())),
-        ),
-    )
-    .item(
-        PopupMenuItem::new(glim_services::locale::tr("Copy Absolute Path")).on_click(
-            move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(absolute.clone())),
-        ),
-    )
 }
 
 fn entry_id(path: &std::path::Path, part: &'static str) -> ElementId {

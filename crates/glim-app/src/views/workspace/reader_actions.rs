@@ -8,9 +8,6 @@ pub(super) enum ToolbarAction {
     Forward,
     Preview,
     Source,
-    SideBySide,
-    Inline,
-    ViewFile,
     WordWrap,
     FileFullscreen,
     Update,
@@ -32,9 +29,6 @@ impl ToolbarAction {
             Self::Forward => "forward",
             Self::Preview => "reader-preview",
             Self::Source => "reader-source",
-            Self::SideBySide => "diff-split",
-            Self::Inline => "diff-inline",
-            Self::ViewFile => "show-file",
             Self::WordWrap => "word-wrap",
             Self::FileFullscreen => "file-fullscreen",
             Self::Update => "update-available",
@@ -50,9 +44,6 @@ impl ToolbarItem {
             ToolbarAction::Forward => ("Forward", Some(IconName::ArrowRight)),
             ToolbarAction::Preview => ("Preview", Some(IconName::Eye)),
             ToolbarAction::Source => ("Source", Some(IconName::Code)),
-            ToolbarAction::SideBySide => ("Side by side", Some(IconName::Columns2)),
-            ToolbarAction::Inline => ("Inline", Some(IconName::Rows2)),
-            ToolbarAction::ViewFile => ("View file", Some(IconName::FileText)),
             ToolbarAction::WordWrap => ("Word wrap", None),
             ToolbarAction::FileFullscreen => ("Enter File Fullscreen", None),
             ToolbarAction::Update => ("Update Available", Some(IconName::Download)),
@@ -67,21 +58,11 @@ impl ToolbarItem {
     }
 }
 
-/// Fixed order: viewing mode, related file action, then text layout.
+/// Fixed order: viewing mode, then text layout.
 /// Capabilities come from the active reader, not a separate extension allowlist.
 pub(super) fn document_items(reader: &Reader, word_wrap: bool) -> Vec<ToolbarItem> {
     let mut items = Vec::new();
-    if reader.diff.is_some() || reader.historical {
-        let mut split = ToolbarItem::new(ToolbarAction::SideBySide);
-        split.selected = reader.side_by_side();
-        split.enabled = reader.split_available();
-        let mut inline = ToolbarItem::new(ToolbarAction::Inline);
-        inline.selected = !split.selected;
-        items.extend([split, inline]);
-        if reader.diff.is_some() {
-            items.push(ToolbarItem::new(ToolbarAction::ViewFile));
-        }
-    } else if reader.can_preview() {
+    if reader.can_preview() {
         let mut preview = ToolbarItem::new(ToolbarAction::Preview);
         if reader.is_json() {
             preview.label = "JSON tree";
@@ -113,4 +94,37 @@ pub(super) fn document_items(reader: &Reader, word_wrap: bool) -> Vec<ToolbarIte
         items.push(wrap);
     }
     items
+}
+
+impl super::Workspace {
+    pub(super) fn toggle_markdown_task(
+        &mut self,
+        editor: gpui_kit::EntityId,
+        range: std::ops::Range<usize>,
+        checked: bool,
+        revision: usize,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) {
+        if self.editing_locked || crate::app::workspace_editors_locked(cx) {
+            return;
+        }
+        let changed = self
+            .tabs
+            .iter_mut()
+            .find(|reader| {
+                reader
+                    .editor()
+                    .is_some_and(|state| state.entity_id() == editor)
+            })
+            .is_some_and(|reader| reader.toggle_task(range, checked, revision, window, cx));
+        if changed {
+            glim_services::telemetry::track(
+                "markdown_task_toggled",
+                [("completed", glim_services::telemetry::flag(checked))],
+            );
+            self.save_editor(editor, window, cx);
+        }
+        cx.notify();
+    }
 }

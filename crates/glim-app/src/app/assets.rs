@@ -34,14 +34,34 @@ gpui_kit::assets::icon_assets!(
         Minus,
         ChevronDown,
         ChevronRight,
-        FolderGit2
+        FolderGit2,
+        ArrowUpRight,
+        Clock,
+        FilePlus,
+        Folder,
+        FolderPlus,
+        Folders,
+        PanelsTopLeft
     ]
 );
+
+#[path = "file_icon_assets.rs"]
+mod file_icons;
 
 pub struct Assets;
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
+        if path.starts_with("file-icons/") {
+            let bytes = match file_icons::ASSETS.binary_search_by(|entry| entry.0.cmp(path)) {
+                Ok(index) => file_icons::ASSETS[index].1,
+                Err(_) => {
+                    log::warn!("Unregistered file icon {path}; using the default document icon");
+                    file_icons::FALLBACK
+                }
+            };
+            return Ok(Some(Cow::Borrowed(bytes)));
+        }
         match path {
             "navigation/appearance.svg" => {
                 return Ok(Some(Cow::Borrowed(include_bytes!(
@@ -68,181 +88,16 @@ impl AssetSource for Assets {
                     "../../../../assets/navigation/files.svg"
                 ))));
             }
-            "navigation/git.svg" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/navigation/git.svg"
-                ))));
-            }
-            "file-icons/audio.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/audio.png"
-                ))));
-            }
-            "file-icons/c.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/c.png"
-                ))));
-            }
-            "file-icons/cpp.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/cpp.png"
-                ))));
-            }
-            "file-icons/css.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/css.png"
-                ))));
-            }
-            "file-icons/database.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/database.png"
-                ))));
-            }
-            "file-icons/docker.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/docker.png"
-                ))));
-            }
-            "file-icons/document.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/document.png"
-                ))));
-            }
-            "file-icons/git.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/git.png"
-                ))));
-            }
-            "file-icons/go.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/go.png"
-                ))));
-            }
-            "file-icons/html.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/html.png"
-                ))));
-            }
-            "file-icons/image.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/image.png"
-                ))));
-            }
-            "file-icons/java.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/java.png"
-                ))));
-            }
-            "file-icons/javascript.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/javascript.png"
-                ))));
-            }
-            "file-icons/json.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/json.png"
-                ))));
-            }
-            "file-icons/kotlin.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/kotlin.png"
-                ))));
-            }
-            "file-icons/lock.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/lock.png"
-                ))));
-            }
-            "file-icons/markdown.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/markdown.png"
-                ))));
-            }
-            "file-icons/pdf.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/pdf.png"
-                ))));
-            }
-            "file-icons/php.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/php.png"
-                ))));
-            }
-            "file-icons/python.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/python.png"
-                ))));
-            }
-            "file-icons/react.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/react.png"
-                ))));
-            }
-            "file-icons/ruby.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/ruby.png"
-                ))));
-            }
-            "file-icons/rust.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/rust.png"
-                ))));
-            }
-            "file-icons/settings.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/settings.png"
-                ))));
-            }
-            "file-icons/svelte.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/svelte.png"
-                ))));
-            }
-            "file-icons/swift.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/swift.png"
-                ))));
-            }
-            "file-icons/toml.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/toml.png"
-                ))));
-            }
-            "file-icons/typescript.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/typescript.png"
-                ))));
-            }
-            "file-icons/video.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/video.png"
-                ))));
-            }
-            "file-icons/vue.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/vue.png"
-                ))));
-            }
-            "file-icons/xml.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/xml.png"
-                ))));
-            }
-            "file-icons/yaml.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/yaml.png"
-                ))));
-            }
-            "file-icons/zip.png" => {
-                return Ok(Some(Cow::Borrowed(include_bytes!(
-                    "../../../../assets/file-icons/zip.png"
-                ))));
-            }
             _ => {}
         }
         if path == "branding/glim.png" {
             return Ok(Some(Cow::Borrowed(include_bytes!(
                 "../../../../assets/branding/glim.png"
+            ))));
+        }
+        if path == "branding/glim-welcome.png" {
+            return Ok(Some(Cow::Borrowed(include_bytes!(
+                "../../../../assets/branding/glim-welcome.png"
             ))));
         }
         if let Some(icon) = ViewerIcons.load(path)? {
@@ -254,9 +109,44 @@ impl AssetSource for Assets {
     fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
         let mut assets = gpui_kit::assets::Assets.list(path)?;
         assets.extend(ViewerIcons.list(path)?);
+        assets.extend(
+            file_icons::ASSETS
+                .iter()
+                .filter(|(name, _)| name.starts_with(path))
+                .map(|(name, _)| SharedString::from(*name)),
+        );
         if "branding/glim.png".starts_with(path) {
             assets.push("branding/glim.png".into());
         }
+        if "branding/glim-welcome.png".starts_with(path) {
+            assets.push("branding/glim-welcome.png".into());
+        }
         Ok(assets)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_registered_file_icon_is_loadable_and_listed() {
+        assert!(
+            file_icons::ASSETS
+                .windows(2)
+                .all(|pair| pair[0].0 < pair[1].0),
+            "File icon resources must be sorted by full path"
+        );
+        let source = Assets;
+        let listed = source.list("file-icons/").unwrap();
+        for (path, expected) in file_icons::ASSETS {
+            let loaded = source
+                .load(path)
+                .unwrap()
+                .unwrap_or_else(|| panic!("Missing embedded icon: {path}"));
+            assert_eq!(loaded.as_ref(), *expected, "{path}");
+            assert!(loaded.starts_with(b"\x89PNG\r\n\x1a\n"), "{path}");
+            assert!(listed.iter().any(|entry| entry.as_ref() == *path), "{path}");
+        }
     }
 }

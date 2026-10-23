@@ -1,5 +1,5 @@
 use super::actions::{
-    About, AddFolder, CheckForUpdates, CloseWorkspace, NewWindow, OpenFile, OpenFolder,
+    About, AddFolder, CheckForUpdates, CloseWorkspace, NewFile, NewWindow, OpenFile, OpenFolder,
     OpenSettings, Quit, SaveFile, TogglePreview, ToggleSidebar, ToggleWordWrap,
 };
 use glim_services::locale::tr;
@@ -30,6 +30,7 @@ pub(super) fn update(cx: &mut App) {
             name: tr("File").into(),
             disabled: false,
             items: vec![
+                MenuItem::action(tr("New File"), NewFile),
                 MenuItem::action(tr("New Window"), NewWindow),
                 MenuItem::separator(),
                 MenuItem::action(tr("Open File…"), OpenFile),

@@ -52,24 +52,8 @@ impl UpdateSnapshot {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionTab {
-    File {
-        path: PathBuf,
-        preview: bool,
-    },
-    Playlist {
-        path: PathBuf,
-        shuffle: bool,
-    },
-    Diff {
-        root: PathBuf,
-        change: crate::GitChange,
-        side_by_side: bool,
-    },
-    Commit {
-        root: PathBuf,
-        commit: String,
-        file: Option<PathBuf>,
-    },
+    File { path: PathBuf, preview: bool },
+    Playlist { path: PathBuf, shuffle: bool },
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceSession {
@@ -90,14 +74,11 @@ pub struct UpdateSession {
 pub struct UpdateActivity {
     pub dirty: bool,
     pub saving: bool,
-    pub git: bool,
     pub loading: bool,
 }
 impl UpdateActivity {
     pub fn blocker(self) -> Option<&'static str> {
-        if self.git {
-            Some("Wait for Git operations to finish before updating.")
-        } else if self.saving {
+        if self.saving {
             Some("Wait for files to finish saving before updating.")
         } else if self.dirty {
             Some("Save all modified files before updating. Conflicting files need your attention.")
@@ -122,10 +103,6 @@ mod tests {
             },
             UpdateActivity {
                 saving: true,
-                ..Default::default()
-            },
-            UpdateActivity {
-                git: true,
                 ..Default::default()
             },
             UpdateActivity {

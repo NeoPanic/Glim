@@ -9,6 +9,7 @@ use std::{cell::Cell, collections::HashMap, ops::Range, path::Path, rc::Rc};
 
 pub(super) struct MarkupReader {
     pub source: SourceReader,
+    pub(super) task_toggle: Option<super::ToggleTask>,
     pub preview: bool,
     pub html: bool,
     browser: Option<Entity<super::native::NativeReader>>,
@@ -99,6 +100,7 @@ impl MarkupReader {
             })
         });
         Self {
+            task_toggle: None,
             browser,
             pictures,
             _picture_subscription: picture_subscription,
@@ -110,7 +112,6 @@ impl MarkupReader {
                 text,
                 glim_core::language_for_path(path),
                 false,
-                Vec::new(),
                 scroll.clone(),
                 window,
                 cx,
@@ -168,6 +169,73 @@ impl MarkupReader {
             diagrams.update(cx, |diagrams, cx| diagrams.reset(cx));
         }
     }
+    pub fn toggle_task(
+        &mut self,
+        range: Range<usize>,
+        checked: bool,
+        revision: usize,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        if self.html
+            || self.format_path.is_some()
+            || !self.preview
+            || revision != self.preview_generation.get()
+            || !self
+                .source
+                .state
+                .read(cx)
+                .context_menu_capabilities()
+                .is_editable()
+        {
+            return false;
+        }
+        let text = self.source.state.read(cx).value().to_string();
+        if text != self.preview_text {
+            self.sync_preview(cx);
+            return false;
+        }
+        let (projected, omitted) =
+            glim_services::markdown_preview::normalize_tables_with_mapping(&text);
+        if self.state.read(cx).rendered_text().source() != projected.as_ref() {
+            return false;
+        }
+        let mut offset = range.start;
+        for gap in omitted {
+            if gap.start <= offset {
+                offset += gap.len();
+            } else {
+                break;
+            }
+        }
+        let Some(marker) = task_marker(&text, offset) else {
+            return false;
+        };
+        if !matches!(text.as_bytes()[marker], b' ' | b'x' | b'X')
+            || (text.as_bytes()[marker] != b' ') == checked
+        {
+            return false;
+        }
+        let utf16 = text[..marker].encode_utf16().count();
+        self.source.state.update(cx, |editor, cx| {
+            let selection = editor.selected_range();
+            let scroll = editor.scroll_offset();
+            editor.unmark_text(window, cx);
+            editor.replace_text_in_range(
+                Some(utf16..utf16 + 1),
+                if checked { "x" } else { " " },
+                window,
+                cx,
+            );
+            editor.unmark_text(window, cx);
+            editor.set_selected_range(selection, cx);
+            editor.set_scroll_offset(scroll, cx);
+        });
+        self.pending_scroll = Some(self.state.read(cx).list_state().logical_scroll_top());
+        self.sync_preview(cx);
+        true
+    }
+
     pub fn reveal(&mut self, anchor: &str, cx: &mut App) {
         if let Some(browser) = &self.browser {
             browser.update(cx, |browser, _| browser.reveal_html_anchor(anchor));
@@ -286,6 +354,19 @@ impl MarkupReader {
         } else {
             text_view
         };
+        let text_view = if !self.html && self.format_path.is_none() {
+            if let Some(toggle) = self.task_toggle.clone() {
+                let editor = self.source.state.entity_id();
+                let revision = self.preview_generation.get();
+                text_view.on_task_toggle(move |range, checked, window, cx| {
+                    toggle(editor, range, checked, revision, window, cx);
+                })
+            } else {
+                text_view
+            }
+        } else {
+            text_view
+        };
         let body = div()
             .relative()
             .size_full()
@@ -379,6 +460,19 @@ pub(super) fn follow_link(
     cx: &mut App,
 ) {
     if let Ok(url) = base.join(href) {
+        glim_services::telemetry::reader_feature(
+            "markdown",
+            "follow_link",
+            [(
+                "destination",
+                glim_services::telemetry::text(match url.scheme() {
+                    "file" => "local",
+                    "http" | "https" => "web",
+                    "mailto" => "email",
+                    _ => "other",
+                }),
+            )],
+        );
         match url.scheme() {
             "file" => {
                 if let Ok(path) = url.to_file_path() {
@@ -390,6 +484,42 @@ pub(super) fn follow_link(
         }
     }
 }
+// The mdast list-item span starts at its bullet, so matching the marker here
+// cannot toggle examples in code blocks or similarly worded tasks elsewhere.
+fn task_marker(text: &str, start: usize) -> Option<usize> {
+    let line = text.get(start..)?.split(['\r', '\n']).next()?;
+    let bytes = line.as_bytes();
+    let mut index = match bytes.first()? {
+        b'-' | b'+' | b'*' => 1,
+        b'0'..=b'9' => {
+            let digits = bytes
+                .iter()
+                .take_while(|byte| byte.is_ascii_digit())
+                .count();
+            if digits > 9 || !matches!(bytes.get(digits)?, b'.' | b')') {
+                return None;
+            }
+            digits + 1
+        }
+        _ => return None,
+    };
+    let space = index;
+    while matches!(bytes.get(index), Some(b' ' | b'\t')) {
+        index += 1;
+    }
+    if index == space
+        || bytes.get(index) != Some(&b'[')
+        || !matches!(bytes.get(index + 1), Some(b' ' | b'x' | b'X'))
+        || bytes.get(index + 2) != Some(&b']')
+        || bytes
+            .get(index + 3)
+            .is_some_and(|byte| !byte.is_ascii_whitespace())
+    {
+        return None;
+    }
+    Some(start + index + 1)
+}
+
 fn decode_fragment(value: &str) -> String {
     let mut bytes = Vec::new();
     let mut i = 0;

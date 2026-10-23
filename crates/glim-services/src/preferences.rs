@@ -213,32 +213,6 @@ pub fn save_preview_mode(kind: &str, preview: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn diff_side_by_side() -> Option<bool> {
-    let path = wrap_path().ok()?.with_file_name("git-diff-view");
-    match std::fs::read_to_string(path).ok()?.trim() {
-        "side-by-side" => Some(true),
-        "inline" => Some(false),
-        _ => None,
-    }
-}
-pub fn save_diff_mode(side_by_side: bool) -> Result<()> {
-    let path = wrap_path()?.with_file_name("git-diff-view");
-    let parent = path.parent().context("Invalid preferences path")?;
-    std::fs::create_dir_all(parent)?;
-    let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    writeln!(
-        file,
-        "{}",
-        if side_by_side {
-            "side-by-side"
-        } else {
-            "inline"
-        }
-    )?;
-    file.persist(path)?;
-    Ok(())
-}
-
 pub fn language() -> Option<String> {
     let path = wrap_path().ok()?.with_file_name("language");
     let value = std::fs::read_to_string(path).ok()?;

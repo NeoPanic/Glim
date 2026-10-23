@@ -1,12 +1,12 @@
 # Glim development
 
-- Product scope: a macOS viewer (Apple Silicon and Intel) for Markdown, source code, and Git diffs, with explicit staging/unstaging controls and a Git commit input (Command-Enter, staged contents only); no cloning. Ordinary UTF-8 files support basic notepad-style editing, automatic saving and explicit saving; diffs, images and unsupported files remain read-only.
+- Product scope: a macOS file viewer (Apple Silicon and Intel) for documents, data, images and source code in one workspace. Ordinary UTF-8 files support basic notepad-style editing, automatic saving and explicit saving; images, document previews and unsupported files remain read-only.
 - Platform strategy: maintain and release only macOS Apple Silicon and Intel. The repository is macOS-only: do not add non-macOS backends, platform branches, dependencies or release jobs without explicit user direction. Keep existing public release assets intact.
 - Keep crate dependencies one-way: glim-app -> glim-services -> glim-core;
   glim-app may also depend on glim-core directly.
 - glim-core must not depend on GPUI or perform I/O. Services do not import UI.
 - Keep main.rs thin. Put application startup/actions in app/ and presentation in views/.
-- Never perform file reads, directory scans, or Git commands inside render methods.
+- Never perform file reads, directory scans, or blocking commands inside render methods.
   Schedule blocking work through the background executor and retain/cancel task handles.
 - Keep GPUI entities alive across renders. Use theme tokens for UI colors.
 - Define reader operations through `views/workspace/reader_actions.rs` (GPUI) or `native/ReaderActions.swift` (native). Inject format-specific ordered controls into the shared toolbar; reuse the same live actions for content context menus. Route native context clicks through `ReaderContextMenu` and build menus with `ReaderMenu`; do not add independent system-menu filtering or reader-specific right-click event monitors. Preserve source-editor editing menus and embedded web/media interactions.

@@ -12,6 +12,7 @@ impl Render for Shortcuts {
         let entries = [
             ("Open Settings", "⌘,"),
             ("New window", "⌘⇧N"),
+            ("New file", "⌘N"),
             ("Open file", "⌘O"),
             ("Open folder", "⌘⇧O"),
             ("Add workspace folder", "⌘⌥O"),
@@ -123,6 +124,7 @@ impl Render for Shortcuts {
     }
 }
 pub fn open(cx: &mut App) {
+    glim_services::telemetry::track("shortcuts_opened", []);
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,

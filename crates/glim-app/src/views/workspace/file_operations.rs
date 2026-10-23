@@ -3,13 +3,57 @@ use gpui_kit::*;
 use std::path::{Path, PathBuf};
 
 impl Workspace {
+    pub(super) fn choose_new_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let directory = self
+            .active_reader()
+            .and_then(|reader| {
+                reader
+                    .draft_directory
+                    .clone()
+                    .or_else(|| reader.path.parent().map(Path::to_path_buf))
+            })
+            .or_else(|| self.root.clone())
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("/"));
+        self.choose_new_file_in(directory, window, cx);
+    }
+
+    pub(super) fn choose_new_file_in(
+        &mut self,
+        directory: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.picking
+            || self.close_request.is_some()
+            || crate::app::updates::busy(cx)
+            || crate::app::workspace_editors_locked(cx)
+        {
+            return;
+        }
+        glim_services::telemetry::track("draft_created", []);
+        let reader = crate::views::reader::Reader::untitled(directory, window, cx);
+        reader.set_word_wrap(self.word_wrap, window, cx);
+        self.load_task = None;
+        self.loading = false;
+        self.loading_preview = false;
+        self.page = super::Page::Document;
+        self.error = None;
+        self.tabs.push(reader);
+        self.active = Some(self.tabs.len() - 1);
+        self.tab_scroll.scroll_to_item(self.tabs.len() - 1);
+        self.observe_autosave(window, cx);
+        self.tabs.last().unwrap().focus_source(window, cx);
+        cx.notify();
+    }
+
     pub(super) fn confirm_trash(
         &mut self,
         path: PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.confirm_task.is_some() || crate::app::git_editors_locked(cx) {
+        if self.confirm_task.is_some() || crate::app::workspace_editors_locked(cx) {
             return;
         }
         let title = glim_services::locale::tr("Move to Trash?");
@@ -42,29 +86,32 @@ impl Workspace {
     }
 
     fn trash(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        // Share the existing cross-window mutation lock with Git to prevent autosave
-        // or a checkout racing the move. Recheck after the confirmation dialog.
-        if self.has_unsaved() || self.is_saving() || self.has_running_git(cx) {
+        // Share the cross-window mutation lock to prevent autosave racing
+        // the move. Recheck after the confirmation dialog.
+        if self.has_unsaved() || self.is_saving() {
             self.error = Some(glim_services::locale::tr("Save your changes and wait for active operations before moving an item to Trash.").into());
             cx.notify();
             return;
         }
-        if let Err(error) = crate::app::lock_git_editors(cx.entity().entity_id(), cx) {
+        if let Err(error) = crate::app::lock_workspace_editors(cx.entity().entity_id(), cx) {
             self.error = Some(error.to_string().into());
             cx.notify();
             return;
         }
-        self.set_git_editing_locked(true, cx);
+        self.set_editing_locked(true, cx);
         let target = path.clone();
-        let work = cx
-            .background_executor()
-            .spawn(async move { glim_services::workspace::trash_entry(&target) });
+        let work = cx.background_executor().spawn(async move {
+            let started = std::time::Instant::now();
+            let result = glim_services::workspace::trash_entry(&target);
+            glim_services::telemetry::result("move_to_trash", Some(&target), started, &result);
+            result
+        });
         self.confirm_task = Some(cx.spawn_in(window, async move |view, cx| {
             let result = work.await;
             let _ = view.update_in(cx, |view, window, cx| {
                 view.confirm_task = None;
-                view.set_git_editing_locked(false, cx);
-                crate::app::unlock_git_editors(cx.entity().entity_id(), cx);
+                view.set_editing_locked(false, cx);
+                crate::app::unlock_workspace_editors(cx.entity().entity_id(), cx);
                 match result {
                     Ok(()) => {
                         view.did_trash(&path, window, cx);
@@ -100,7 +147,7 @@ impl Workspace {
         let targets = self
             .tabs
             .iter()
-            .filter(|reader| !reader.historical && reader.path.starts_with(path))
+            .filter(|reader| reader.path.starts_with(path))
             .map(super::header::Target::from_reader)
             .collect();
         self.close_tabs_unchecked(targets, window, cx);

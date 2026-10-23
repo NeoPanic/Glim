@@ -68,6 +68,7 @@ final class WordPreview: NSObject, WKNavigationDelegate {
                   event.charactersIgnoringModifiers?.lowercased() == "c" else { return event }
             let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
             guard modifiers == .command || modifiers == .control else { return event }
+            ReaderTelemetry.record(3, 107)
             self.copyGeneration += 1
             let generation = self.copyGeneration
             let changeCount = NSPasteboard.general.changeCount
@@ -107,10 +108,10 @@ final class WordPreview: NSObject, WKNavigationDelegate {
         }
         updateZoom()
     }
-    @objc private func toggleMode() { readingMode.toggle(); showMode() }
-    @objc private func increaseZoom() { percent = min(ReaderLimits.WORD_ZOOM_MAX_PERCENT, percent + ReaderLimits.WORD_ZOOM_STEP_PERCENT); updateZoom() }
-    @objc private func decreaseZoom() { percent = max(ReaderLimits.WORD_ZOOM_MIN_PERCENT, percent - ReaderLimits.WORD_ZOOM_STEP_PERCENT); updateZoom() }
-    @objc private func resetZoom() { percent = 100; updateZoom() }
+    @objc private func toggleMode() { ReaderTelemetry.record(3, 9, 0); readingMode.toggle(); showMode() }
+    @objc private func increaseZoom() { ReaderTelemetry.record(3, 1, 0); percent = min(ReaderLimits.WORD_ZOOM_MAX_PERCENT, percent + ReaderLimits.WORD_ZOOM_STEP_PERCENT); updateZoom() }
+    @objc private func decreaseZoom() { ReaderTelemetry.record(3, 2, 0); percent = max(ReaderLimits.WORD_ZOOM_MIN_PERCENT, percent - ReaderLimits.WORD_ZOOM_STEP_PERCENT); updateZoom() }
+    @objc private func resetZoom() { ReaderTelemetry.record(3, 3, 0); percent = 100; updateZoom() }
     private func updateZoom() {
         web.pageZoom = Double(percent) / 100
         zoomLabel.stringValue = "\(percent)%"
@@ -119,11 +120,11 @@ final class WordPreview: NSObject, WKNavigationDelegate {
         reset.isEnabled = percent != 100
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard !closed else { return }; loaded = true; showMode()
+        guard !closed else { return }; ReaderTelemetry.record(3, 26); loaded = true; showMode()
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed() }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { failed() }
-    private func failed() {
+    private func failed() { ReaderTelemetry.record(3, 0, 1);
         guard !closed else { return }
         readingFailed = true; showMode()
     }

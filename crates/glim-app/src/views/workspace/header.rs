@@ -16,19 +16,11 @@ use std::path::PathBuf;
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct Target {
     pub path: PathBuf,
-    pub diff: Option<glim_core::GitChange>,
-    pub root: Option<PathBuf>,
-    pub commit_id: Option<String>,
-    pub commit_file: Option<PathBuf>,
 }
 impl Target {
     pub(super) fn from_reader(reader: &crate::views::reader::Reader) -> Self {
         Self {
             path: reader.path.clone(),
-            diff: reader.diff.clone(),
-            root: reader.repository_root.clone(),
-            commit_id: reader.commit_id.clone(),
-            commit_file: reader.commit_file.clone(),
         }
     }
 }
@@ -41,6 +33,9 @@ impl Workspace {
         let Some(r) = self.active_reader() else {
             return;
         };
+        if r.draft_directory.is_some() {
+            return;
+        }
         let target = Target::from_reader(r);
         if self.history_cursor.and_then(|i| self.history.get(i)) == Some(&target) {
             return;
@@ -67,13 +62,7 @@ impl Workspace {
         }
         self.history_cursor = Some(next);
         self.navigating = true;
-        if let (Some(root), Some(oid)) = (target.root.clone(), target.commit_id) {
-            self.open_commit_file(root, oid, target.commit_file, window, cx);
-        } else if let (Some(root), Some(change)) = (target.root, target.diff) {
-            self.open_diff(root, change, window, cx);
-        } else {
-            self.open_path(target.path, window, cx);
-        }
+        self.open_path(target.path, window, cx);
     }
     pub(super) fn search_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search_offset = 0;
@@ -106,10 +95,27 @@ impl Workspace {
             let _ = view.update(cx, |view, cx| {
                 match result {
                     Ok(page) => {
+                        glim_services::telemetry::track(
+                            "workspace_search_completed",
+                            [
+                                (
+                                    "result_count",
+                                    glim_services::telemetry::number(page.paths.len() as u64),
+                                ),
+                                ("has_more", glim_services::telemetry::flag(page.more)),
+                            ],
+                        );
                         view.results = page.paths;
                         view.search_more = page.more;
                     }
-                    Err(error) => view.error = Some(format!("{error:#}").into()),
+                    Err(error) => {
+                        glim_services::telemetry::operation_failed(
+                            "workspace_search",
+                            None,
+                            &error,
+                        );
+                        view.error = Some(format!("{error:#}").into());
+                    }
                 }
                 cx.notify();
             });
@@ -118,6 +124,10 @@ impl Workspace {
     }
     pub(super) fn toggle_word_wrap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.word_wrap = !self.word_wrap;
+        glim_services::telemetry::track(
+            "word_wrap_changed",
+            [("enabled", glim_services::telemetry::flag(self.word_wrap))],
+        );
         let enabled = self.word_wrap;
         cx.global_mut::<crate::app::ReaderPreferences>().word_wrap = enabled;
         for reader in &self.tabs {
@@ -152,6 +162,11 @@ impl Workspace {
             cx.notify();
             return;
         }
+        glim_services::telemetry::file_event(
+            "preview_mode_changed",
+            &self.tabs[index].path,
+            [("preview", glim_services::telemetry::flag(preview))],
+        );
         if !preview {
             self.tabs[index].focus_source(window, cx);
         }
@@ -186,46 +201,14 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(super) fn set_diff_mode(&mut self, side_by_side: bool, cx: &mut Context<Self>) {
-        let Some(index) = self.active else {
-            return;
-        };
-        if side_by_side && !self.tabs[index].split_available() {
-            return;
-        }
-        self.tabs[index].set_side_by_side(side_by_side);
-        let prefs = cx.global_mut::<crate::app::ReaderPreferences>();
-        prefs.diff_side_by_side = Some(side_by_side);
-        let previous = prefs.preview_save_task.take();
-        let task = cx.spawn(async move |view, cx| {
-            if let Some(previous) = previous {
-                previous.await;
-            }
-            let result = cx
-                .background_executor()
-                .spawn(async move { glim_services::preferences::save_diff_mode(side_by_side) })
-                .await;
-            if let Err(error) = result {
-                let _ = view.update(cx, |v, cx| {
-                    v.error = Some(format!("Cannot remember diff mode: {error:#}").into());
-                    cx.notify();
-                });
-            }
-        });
-        cx.global_mut::<crate::app::ReaderPreferences>()
-            .preview_save_task = Some(task);
-        for reader in &mut self.tabs {
-            reader.set_side_by_side(side_by_side);
-        }
-        cx.refresh_windows();
-        cx.notify();
-    }
-
     pub(super) fn header(&self, cx: &mut Context<Self>) -> AnyElement {
         if self.file_fullscreen {
             let name = self
                 .active_reader()
                 .map(|reader| {
+                    if reader.draft_directory.is_some() {
+                        return reader.title.to_string();
+                    }
                     reader
                         .path
                         .file_name()
@@ -327,7 +310,7 @@ impl Workspace {
                                             .w_full()
                                             .min_w_0()
                                             .gap_2()
-                                            .child(crate::views::file_icons::file_icon(path))
+                                            .child(crate::views::file_icons::file_icon(path, cx))
                                             .child(
                                                 v_flex()
                                                     .flex_1()
@@ -349,7 +332,6 @@ impl Workspace {
                                         v.search_offset = 0;
                                         v.search_more = false;
                                         v.search_task = None;
-                                        v.sidebar = super::Sidebar::Files;
                                         v.sidebar_visible = true;
                                         v.open_path(target.clone(), w, cx);
                                     }))

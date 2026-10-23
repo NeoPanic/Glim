@@ -121,12 +121,18 @@ impl XMindReader {
         view
     }
     pub(super) fn reset_view(&mut self, cx: &mut Context<Self>) {
+        glim_services::telemetry::reader_feature("xmind", "reset_view", []);
         self.zoom = 1.;
         self.scroll.set_offset(point(px(0.), px(0.)));
         self.center_root();
         cx.notify();
     }
     pub(super) fn fold_all(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        glim_services::telemetry::reader_feature(
+            "xmind",
+            "fold_all",
+            [("collapsed", glim_services::telemetry::flag(collapsed))],
+        );
         self.collapsed = if collapsed {
             (0..self.document.sheets[self.sheet].topics.len()).collect()
         } else {
@@ -137,6 +143,7 @@ impl XMindReader {
         cx.notify();
     }
     pub(super) fn copy_selected(&self, cx: &mut App) {
+        glim_services::telemetry::reader_feature("xmind", "copy_selected", []);
         let topic = &self.document.sheets[self.sheet].topics[self.selected];
         cx.write_to_clipboard(ClipboardItem::new_string(if topic.notes.is_empty() {
             topic.title.clone()
@@ -172,6 +179,17 @@ impl XMindReader {
         }
     }
     pub(super) fn change_zoom(&mut self, delta: f32, cx: &mut Context<Self>) {
+        glim_services::telemetry::reader_feature(
+            "xmind",
+            "zoom_button",
+            [
+                ("increase", glim_services::telemetry::flag(delta > 0.)),
+                (
+                    "zoom_percent",
+                    glim_services::telemetry::number((self.zoom * 100.) as u64),
+                ),
+            ],
+        );
         let viewport = self.scroll.bounds().size;
         self.zoom_at(
             self.zoom + delta,
@@ -251,7 +269,8 @@ impl Render for XMindReader {
                                         }
                                     })
                                     .on_click(cx.listener(move |v, _, _, cx| {
-                                        v.sheet = index;
+                                        glim_services::telemetry::reader_feature("xmind", "select_sheet", []);
+                                                    v.sheet = index;
                                         v.selected = v.document.sheets[index].roots[0];
                                         v.default_expansion();
                                         v.rebuild();
@@ -378,6 +397,7 @@ impl Render for XMindReader {
                                                 .text_color(cx.theme().foreground)
                                                 .cursor_pointer()
                                                 .on_click(cx.listener(move |v, _, _, cx| {
+                                                    glim_services::telemetry::reader_feature("xmind", "select_topic", []);
                                                     v.selected = index;
                                                     cx.notify();
                                                 }))
@@ -436,7 +456,8 @@ impl Render for XMindReader {
                                                             .on_click(cx.listener(
                                                                 move |v, _, _, cx| {
                                                                     cx.stop_propagation();
-                                                                    if !v.collapsed.remove(&index) {
+                                                                    glim_services::telemetry::reader_feature("xmind", "toggle_topic", []);
+                                                    if !v.collapsed.remove(&index) {
                                                                         v.collapsed.insert(index);
                                                                     }
                                                                     v.rebuild();
@@ -547,7 +568,8 @@ impl Render for XMindReader {
                             Button::new("xmind-collapse-all")
                                 .label(tr("Collapse all"))
                                 .on_click(cx.listener(|v, _, _, cx| {
-                                    v.collapsed =
+                                    glim_services::telemetry::reader_feature("xmind", "collapse_all", []);
+                                                    v.collapsed =
                                         (0..v.document.sheets[v.sheet].topics.len()).collect();
                                     v.rebuild();
                                     v.center_root();
@@ -558,7 +580,8 @@ impl Render for XMindReader {
                             Button::new("xmind-expand-all")
                                 .label(tr("Expand all"))
                                 .on_click(cx.listener(|v, _, _, cx| {
-                                    v.collapsed.clear();
+                                    glim_services::telemetry::reader_feature("xmind", "expand_all", []);
+                                                    v.collapsed.clear();
                                     v.rebuild();
                                     v.center_root();
                                     cx.notify();

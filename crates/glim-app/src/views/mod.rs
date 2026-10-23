@@ -1,5 +1,4 @@
 pub(crate) mod about;
-mod changes;
 pub mod explorer;
 mod minimap;
 mod native_menu_bridge;
@@ -9,7 +8,6 @@ mod welcome;
 pub mod workspace;
 
 mod file_icons;
-mod split_diff;
 
 pub(crate) mod updates;
 
@@ -22,3 +20,7 @@ fn selection_background(cx: &gpui_kit::App) -> gpui_kit::Hsla {
         .blend(cx.theme().foreground.opacity(strength))
         .opacity(1.)
 }
+
+pub(crate) use reader::resource_snapshot;
+
+pub(crate) use reader::set_native_telemetry_enabled;

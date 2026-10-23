@@ -81,6 +81,7 @@ impl Render for OpmlReader {
                             .small()
                             .label(tr("Expand all"))
                             .on_click(cx.listener(|view, _, _, cx| {
+                                glim_services::telemetry::reader_feature("opml", "expand_all", []);
                                 view.expanded.extend(0..view.document.nodes.len());
                                 view.rebuild();
                                 cx.notify();
@@ -91,6 +92,11 @@ impl Render for OpmlReader {
                             .small()
                             .label(tr("Collapse all"))
                             .on_click(cx.listener(|view, _, _, cx| {
+                                glim_services::telemetry::reader_feature(
+                                    "opml",
+                                    "collapse_all",
+                                    [],
+                                );
                                 view.expanded.clear();
                                 view.rebuild();
                                 cx.notify();
@@ -131,6 +137,11 @@ impl Render for OpmlReader {
                                             .label(marker)
                                             .disabled(!group)
                                             .on_click(cx.listener(move |view, _, _, cx| {
+                                                glim_services::telemetry::reader_feature(
+                                                    "opml",
+                                                    "toggle_node",
+                                                    [],
+                                                );
                                                 if !view.expanded.remove(&index) {
                                                     view.expanded.insert(index);
                                                 }

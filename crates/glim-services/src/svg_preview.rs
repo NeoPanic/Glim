@@ -281,8 +281,15 @@ fn prepare_image(
             Event::GeneralRef(reference) if skipped == 0 && (browser_image || !style) => {
                 writer.write_event(Event::GeneralRef(reference))?;
             }
-            Event::DocType(_) => {
-                anyhow::bail!("SVG external entities and document types are unsupported")
+            Event::DocType(declaration) => {
+                // Exporters such as Matplotlib include the standard SVG DTD.
+                // Drop the declaration so downstream readers never fetch it;
+                // internal subsets could define entities and remain unsupported.
+                ensure!(!root, "SVG document type must precede the root element");
+                ensure!(
+                    !declaration.contains(&b'['),
+                    "SVG internal document type subsets are unsupported"
+                );
             }
             Event::Eof => break,
             _ => {}

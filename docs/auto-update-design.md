@@ -61,7 +61,7 @@ flowchart LR
     F --> G[Optional relaunch and tab recovery]
 ```
 
-`app/updates` is the shared coordinator. Before approving an install/quit continuation it checks all registered workspaces for unsaved changes, saves, Git operations and file loading; freezes editing/Git writes; waits for pending preference writes; rechecks the backup; and persists a bounded session checkpoint. Failure keeps the old app and restores interaction. A new Finder open invalidates the pending exit generation and retains the file request.
+`app/updates` is the shared coordinator. Before approving an install/quit continuation it checks all registered workspaces for unsaved changes, saves and file loading; freezes editing and file writes; waits for pending preference writes; rechecks the backup; and persists a bounded session checkpoint. Failure keeps the old app and restores interaction. A new Finder open invalidates the pending exit generation and retains the file request.
 
 `SPUUserDriver` handles native status/choices; Rust owns work approval. The bridge adds the missing `applicationShouldTerminate:` method to the fixed GPUI delegate without replacing its identity or lifecycle methods. An incompatible existing termination contract disables the updater. Non-cancellable final quit cleanup is not used as an approval gate.
 
@@ -71,7 +71,7 @@ Sparkle owns extraction, installation, permission prompts, bundle replacement an
 
 A complete signed bundle backup is prepared in the background before update activity starts. The backup is a content-fingerprint-named ZIP plus a SHA-256 receipt under `~/Library/Application Support/Glim/UpdateBackups/`. The signature is checked before copying and the receipt checked again before install approval. User documents and preferences are not part of the app backup. Existing matching verified backups are reusable and history is not automatically cleaned.
 
-The one-time session stores workspace roots, file/playlist/diff/commit tabs, order, active tab and supported preview/diff modes. It contains no unsaved document text. Restored media is paused; document scroll positions and media timestamps are not a complete persistent session feature.
+The one-time session stores workspace roots, file/playlist tabs, order, active tab and supported preview modes. It contains no unsaved document text. Restored media is paused; document scroll positions and media timestamps are not a complete persistent session feature.
 
 A checkpoint is consumed once on next startup, including when a failed installation left the original build running or a manual install skipped ahead. Explicit cancellation clears it; corrupt checkpoints are quarantined rather than retried forever. Normal launches without a checkpoint only restore saved workspace roots.
 

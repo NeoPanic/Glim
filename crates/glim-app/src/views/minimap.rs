@@ -7,7 +7,7 @@ use std::{cell::Cell, rc::Rc, sync::Arc};
 /// A compact document overview. Text geometry is cached once, not parsed in render.
 pub struct Minimap {
     source: Entity<EditorState>,
-    lines: Arc<Vec<(u8, u8, i8)>>,
+    lines: Arc<Vec<(u8, u8)>>,
     preview_scroll: ScrollHandle,
     preview: bool,
     preview_list: Option<ListState>,
@@ -20,7 +20,6 @@ impl Minimap {
     pub fn new(
         source: Entity<EditorState>,
         text: &str,
-        is_diff: bool,
         preview_scroll: ScrollHandle,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -33,14 +32,7 @@ impl Minimap {
                     .count()
                     .min(100);
                 let width = line.chars().take(120).count().saturating_sub(indent);
-                let change = if is_diff && line.starts_with('+') {
-                    1
-                } else if is_diff && line.starts_with('-') {
-                    -1
-                } else {
-                    0
-                };
-                (indent as u8, width as u8, change)
+                (indent as u8, width as u8)
             })
             .collect();
         let subscription = cx.observe(&source, |_, _, cx| cx.notify());
@@ -56,7 +48,7 @@ impl Minimap {
         }
     }
 
-    pub fn set_text(&mut self, text: &str, is_diff: bool, cx: &mut Context<Self>) {
+    pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
         self.lines = Arc::new(
             text.split('\n')
                 .map(|line| {
@@ -66,14 +58,7 @@ impl Minimap {
                         .count()
                         .min(100);
                     let width = line.chars().take(120).count().saturating_sub(indent);
-                    let change = if is_diff && line.starts_with('+') {
-                        1
-                    } else if is_diff && line.starts_with('-') {
-                        -1
-                    } else {
-                        0
-                    };
-                    (indent as u8, width as u8, change)
+                    (indent as u8, width as u8)
                 })
                 .collect(),
         );
@@ -143,8 +128,6 @@ impl Render for Minimap {
         let preview_list = self.preview_list.clone();
         let preview = self.preview;
         let foreground = cx.theme().muted_foreground.opacity(0.45);
-        let added = cx.theme().green.opacity(0.6);
-        let removed = cx.theme().red.opacity(0.6);
         let viewport = cx.theme().primary.opacity(0.12);
         div()
             .id("minimap")
@@ -183,24 +166,20 @@ impl Render for Minimap {
                         let total = lines.len().max(1) as f32;
                         let height = f32::from(bounds.size.height).min(total * 2.);
                         let step = (total / (height / 2.).max(1.)).ceil() as usize;
-                        for (index, &(indent, width, change)) in
+                        for (index, &(indent, width)) in
                             lines.iter().enumerate().step_by(step.max(1))
                         {
                             if width == 0 {
                                 continue;
                             }
                             let y = height * index as f32 / total;
-                            let color = match change {
-                                1 => added,
-                                -1 => removed,
-                                _ => foreground,
-                            };
+
                             window.paint_quad(fill(
                                 Bounds::new(
                                     bounds.origin + point(px(4. + indent as f32 * 0.7), px(y)),
                                     size(px((width as f32 * 0.7).min(86.)), px(1.)),
                                 ),
-                                color,
+                                foreground,
                             ));
                         }
                         let (start, length) = if preview {

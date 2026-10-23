@@ -2,6 +2,7 @@ gpui_kit::actions!(
     glim,
     [
         NewWindow,
+        NewFile,
         OpenSettings,
         About,
         CheckForUpdates,

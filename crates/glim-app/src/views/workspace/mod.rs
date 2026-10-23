@@ -1,7 +1,6 @@
 mod editing;
 mod file_operations;
 mod gestures;
-mod git;
 mod header;
 mod loading;
 mod reader_actions;
@@ -11,18 +10,13 @@ mod settings;
 mod tabs;
 mod toolbar;
 mod updates;
+mod usage;
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 use std::path::PathBuf;
 
-use super::{changes::Changes, explorer::Explorer, reader::Reader};
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Sidebar {
-    Files,
-    Changes,
-}
+use super::{explorer::Explorer, reader::Reader};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -43,7 +37,6 @@ pub struct Workspace {
     file_fullscreen: bool,
     file_fullscreen_entered_window: bool,
     file_fullscreen_seen_window: bool,
-    sidebar_selection: Option<&'static str>,
     history: Vec<header::Target>,
     history_cursor: Option<usize>,
     navigating: bool,
@@ -55,7 +48,7 @@ pub struct Workspace {
     sidebar_layout: Entity<gpui_kit::component::resizable::ResizableState>,
     word_wrap: bool,
     preference_task: Option<Task<()>>,
-    repository_task: Option<Task<()>>,
+    watch_scan_task: Option<Task<()>>,
     results: Vec<PathBuf>,
     search_offset: usize,
     search_more: bool,
@@ -71,14 +64,11 @@ pub struct Workspace {
     root: Option<PathBuf>,
     roots: Vec<PathBuf>,
     explorer: Option<Entity<Explorer>>,
-    changes: Option<Entity<Changes>>,
     subscriptions: Vec<Subscription>,
-    sidebar: Sidebar,
     tabs: Vec<Reader>,
     active: Option<usize>,
     tab_scroll: ScrollHandle,
     error: Option<SharedString>,
-    last_scan_warning: Option<String>,
     loading: bool,
     loading_preview: bool,
     load_task: Option<Task<()>>,
@@ -89,15 +79,40 @@ pub struct Workspace {
     save_task: Option<Task<()>>,
     save_cancel: Option<glim_services::work::CancelOnDrop>,
     saving: Option<EntityId>,
-    git_busy: bool,
-    git_edit_locked: bool,
+    editing_locked: bool,
+    usage: Option<usage::Segment>,
+    scroll_usage: Option<usage::ScrollUsage>,
+    scroll_usage_task: Option<Task<()>>,
+    usage_task: Option<Task<()>>,
+    usage_activation: Option<Subscription>,
+    telemetry_edited: std::collections::HashSet<EntityId>,
     autosave: std::collections::HashMap<EntityId, (Subscription, Option<Task<()>>)>,
     save_queue: std::collections::VecDeque<EntityId>,
     confirm_task: Option<Task<()>>,
+    close_request: Option<editing::CloseRequest>,
+    recovery_keys: std::collections::HashMap<EntityId, String>,
+    edit_revision: u64,
+    quit_approval: Option<u64>,
+    quit_discards: Vec<EntityId>,
     context_menu_task: Option<Task<()>>,
 }
 
 impl Workspace {
+    pub(crate) fn set_editing_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
+        self.editing_locked = locked;
+        if locked {
+            self.refresh_task = None;
+        }
+        for reader in &mut self.tabs {
+            reader.set_editing_locked(locked, cx);
+        }
+        cx.notify();
+    }
+    pub(crate) fn unlock_and_refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_editing_locked(false, cx);
+        self.refresh(window, cx);
+    }
+
     pub(crate) fn recent_visible(&self) -> usize {
         self.recent_visible
     }
@@ -122,6 +137,7 @@ impl Workspace {
     }
 
     pub(crate) fn show_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        glim_services::telemetry::track("settings_opened", []);
         self.page = Page::Settings;
         self.results.clear();
         self.search_task = None;
@@ -137,13 +153,27 @@ impl Workspace {
                 cx,
             )
         });
-        if let Some(changes) = &self.changes {
-            changes.update(cx, |view, cx| view.refresh_language(window, cx));
-        }
         cx.notify();
     }
 
     pub fn new(path: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        cx.on_release(|view, _| {
+            view.flush_usage();
+            glim_services::telemetry::track(
+                "window_closed",
+                [
+                    (
+                        "open_tabs",
+                        glim_services::telemetry::number(view.tabs.len() as u64),
+                    ),
+                    (
+                        "workspace_folders",
+                        glim_services::telemetry::number(view.roots.len() as u64),
+                    ),
+                ],
+            );
+        })
+        .detach();
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         let search = cx.new(|cx| {
@@ -196,12 +226,11 @@ impl Workspace {
             file_fullscreen: false,
             file_fullscreen_entered_window: false,
             file_fullscreen_seen_window: false,
-            sidebar_selection: Some("start"),
             word_wrap: cx
                 .try_global::<crate::app::ReaderPreferences>()
                 .is_some_and(|p| p.word_wrap),
             preference_task: None,
-            repository_task: None,
+            watch_scan_task: None,
             search,
             results: Vec::new(),
             search_offset: 0,
@@ -219,14 +248,11 @@ impl Workspace {
             root: None,
             roots: Vec::new(),
             explorer: None,
-            changes: None,
             subscriptions: Vec::new(),
-            sidebar: Sidebar::Files,
             tabs: Vec::new(),
             active: None,
             tab_scroll: ScrollHandle::new(),
             error: None,
-            last_scan_warning: None,
             loading: false,
             loading_preview: false,
             load_task: None,
@@ -237,11 +263,21 @@ impl Workspace {
             save_task: None,
             save_cancel: None,
             saving: None,
-            git_busy: false,
-            git_edit_locked: crate::app::git_editors_locked(cx),
+            editing_locked: crate::app::workspace_editors_locked(cx),
+            usage: None,
+            scroll_usage: None,
+            scroll_usage_task: None,
+            usage_task: None,
+            usage_activation: None,
+            telemetry_edited: Default::default(),
             autosave: Default::default(),
             save_queue: Default::default(),
             confirm_task: None,
+            close_request: None,
+            recovery_keys: Default::default(),
+            edit_revision: 0,
+            quit_approval: None,
+            quit_discards: Vec::new(),
             context_menu_task: None,
         };
         workspace
@@ -259,6 +295,12 @@ impl Workspace {
                 }
             }));
 
+        workspace.usage_activation =
+            Some(cx.observe_window_activation(window, |view, window, cx| {
+                view.update_usage(window, cx);
+                cx.notify();
+            }));
+        workspace.start_usage_timer(window, cx);
         if let Some(path) = path {
             workspace.open_path(path, window, cx);
         }
@@ -267,8 +309,8 @@ impl Workspace {
 }
 
 impl Workspace {
-    fn select_sidebar_navigation(&mut self, item: &'static str, cx: &mut Context<Self>) {
-        self.sidebar_selection = Some(item);
+    fn show_home(&mut self, cx: &mut Context<Self>) {
+        self.page = Page::Start;
         if let Some(explorer) = &self.explorer {
             explorer.update(cx, |view, cx| view.clear_clicked_selection(cx));
         }

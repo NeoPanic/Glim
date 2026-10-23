@@ -3,7 +3,6 @@ mod boundary;
 mod controls;
 mod csv;
 mod diagrams;
-mod diff;
 mod json;
 mod json_format;
 mod lexical;
@@ -18,8 +17,7 @@ mod pictures;
 mod source;
 mod sqlite;
 mod xmind;
-use diff::DiffReader;
-use glim_core::{DiffDocument, Document, DocumentKind, language_for_path};
+use glim_core::{Document, DocumentKind, language_for_path};
 use gpui_kit::*;
 use markup::MarkupReader;
 use media::{GifReader, ImageReader, UnavailableReader};
@@ -63,6 +61,9 @@ pub(super) fn preview_loading(cx: &App) -> AnyElement {
 
 pub type OpenLink = Arc<dyn Fn(PathBuf, Option<String>, &mut Window, &mut App) + Send + Sync>;
 
+pub type ToggleTask =
+    Arc<dyn Fn(EntityId, std::ops::Range<usize>, bool, usize, &mut Window, &mut App) + Send + Sync>;
+
 /// Tab identity is separate from the concrete renderer and its persistent state.
 /// No image/error tab allocates an unused editor. JSON shares the code editor's
 /// syntax-aware folding; Markdown owns preview state as well as a source editor.
@@ -76,7 +77,6 @@ enum Renderer {
         saving: std::rc::Rc<std::cell::Cell<bool>>,
     },
     Markup(Box<MarkupReader>),
-    Diff(DiffReader),
     Image(ImageReader),
     Gif(Entity<GifReader>),
     XMind(Entity<xmind::XMindReader>),
@@ -90,14 +90,11 @@ enum Renderer {
     Unavailable(UnavailableReader),
 }
 pub struct Reader {
-    pub repository_root: Option<PathBuf>,
     pub snapshot: String,
     pub title: SharedString,
     pub path: PathBuf,
-    pub diff: Option<glim_core::GitChange>,
-    pub historical: bool,
-    pub commit_id: Option<String>,
-    pub commit_file: Option<PathBuf>,
+    pub draft_directory: Option<PathBuf>,
+    pub recovery_key: Option<String>,
     json: Option<(Entity<json::JsonTree>, bool)>,
     csv: Option<(Entity<csv::CsvTable>, bool)>,
     renderer: Renderer,
@@ -131,7 +128,6 @@ impl Reader {
                 &document.text,
                 language_for_path(&document.path),
                 false,
-                Vec::new(),
                 ScrollHandle::new(),
                 window,
                 cx,
@@ -168,18 +164,143 @@ impl Reader {
             title: document.path.display().to_string().into(),
             path: document.path,
             snapshot: document.text,
-            repository_root: None,
-            diff: None,
-            historical: false,
-            commit_id: None,
-            commit_file: None,
             structured_controls: None,
+            draft_directory: None,
+            recovery_key: None,
             json,
             csv,
             renderer,
         };
         reader.restore_csv_preview(cx);
         reader
+    }
+    pub fn untitled(directory: PathBuf, window: &mut Window, cx: &mut App) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let number = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let name = format!("{}-{number}", glim_services::locale::tr("Untitled"));
+        let mut reader = Self::new(
+            Document {
+                path: PathBuf::from("/__glim_untitled__").join(&name),
+                kind: DocumentKind::Text,
+                text: String::new(),
+            },
+            window,
+            cx,
+        );
+        reader.title = name.into();
+        reader.draft_directory = Some(directory);
+        reader.recovery_key = Some(format!(
+            "{}-{}-{number}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+            std::process::id()
+        ));
+        reader
+    }
+
+    pub fn restore_draft_text(&mut self, text: String, window: &mut Window, cx: &mut App) {
+        if let Renderer::Source(source) = &mut self.renderer {
+            source
+                .state
+                .update(cx, |editor, cx| editor.set_value(text.clone(), window, cx));
+            source.mark_saved(String::new(), cx);
+            source.minimap.update(cx, |map, cx| map.set_text(&text, cx));
+        }
+    }
+
+    pub fn bind_saved_draft(
+        &mut self,
+        path: PathBuf,
+        saved: String,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        // Keep the live editor, selection and undo history when adopting a path.
+        let current = self.editor().unwrap().read(cx).value().to_string();
+        let mut reader = Self::new(
+            Document {
+                kind: DocumentKind::from_path(&path),
+                path,
+                text: current,
+            },
+            window,
+            cx,
+        );
+        std::mem::swap(&mut self.renderer, &mut reader.renderer);
+        if let Renderer::Source(source) = reader.renderer {
+            match &mut self.renderer {
+                Renderer::Source(target) => *target = source,
+                Renderer::Markup(target) => target.source = source,
+                _ => unreachable!("text document has a source editor"),
+            }
+        }
+        self.path = reader.path;
+        self.title = reader.title;
+        self.json = reader.json;
+        self.csv = reader.csv;
+        self.draft_directory = None;
+        if let Some(editor) = self.editor() {
+            let language = language_for_path(&self.path);
+            editor.update(cx, |editor, cx| {
+                if lexical::supports(language) {
+                    editor.set_highlighter_factory(
+                        std::rc::Rc::new(|name| Some(Box::new(lexical::Lexical::new(name)))),
+                        cx,
+                    );
+                }
+                editor.set_highlighter(language, cx);
+            });
+        }
+        self.set_preview(false, cx);
+        self.mark_saved(saved, cx);
+    }
+
+    pub fn set_task_toggle_handler(&mut self, handler: ToggleTask, cx: &App) {
+        let editable = self
+            .editor()
+            .is_some_and(|editor| editor.read(cx).context_menu_capabilities().is_editable());
+        if let Renderer::Markup(markup) = &mut self.renderer {
+            markup.task_toggle = editable.then_some(handler);
+        }
+    }
+
+    pub fn toggle_task(
+        &mut self,
+        range: std::ops::Range<usize>,
+        checked: bool,
+        revision: usize,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        if let Renderer::Markup(markup) = &mut self.renderer {
+            markup.toggle_task(range, checked, revision, window, cx)
+        } else {
+            false
+        }
+    }
+
+    pub fn telemetry_kind(&self) -> &'static str {
+        match &self.renderer {
+            Renderer::Source(_) => "source",
+            Renderer::Markup(markup) => {
+                if markup.html {
+                    "html"
+                } else {
+                    "markdown"
+                }
+            }
+            Renderer::Paged { .. } => "paged",
+            Renderer::Image(_) => "image",
+            Renderer::Gif(_) => "animated_image",
+            Renderer::XMind(_) => "xmind",
+            Renderer::Book(..) => "ebook",
+            Renderer::Native(_) => "native",
+            Renderer::Sqlite(_) => "sqlite",
+            Renderer::Opml(_) => "opml",
+            Renderer::Unavailable(_) => "unavailable",
+        }
     }
     pub fn copy_image(&self, cx: &mut App) -> bool {
         if let Renderer::Image(image) = &self.renderer
@@ -193,15 +314,12 @@ impl Reader {
 
     pub fn from_sqlite(path: PathBuf, window: &mut Window, cx: &mut App) -> Self {
         Self {
-            repository_root: None,
             snapshot: "sqlite-preview".into(),
             title: path.display().to_string().into(),
             path: path.clone(),
-            diff: None,
-            historical: false,
-            commit_id: None,
-            commit_file: None,
             structured_controls: None,
+            draft_directory: None,
+            recovery_key: None,
             json: None,
             csv: None,
             renderer: Renderer::Sqlite(cx.new(|cx| sqlite::SqliteReader::new(path, window, cx))),
@@ -218,15 +336,12 @@ impl Reader {
         cx: &mut App,
     ) -> Self {
         Self {
-            repository_root: None,
             snapshot: "native-preview".into(),
             title: path.display().to_string().into(),
             path: path.clone(),
-            diff: None,
-            historical: false,
-            commit_id: None,
-            commit_file: None,
             structured_controls: None,
+            draft_directory: None,
+            recovery_key: None,
             json: None,
             csv: None,
             renderer: Renderer::Native(cx.new(|cx| {
@@ -244,20 +359,6 @@ impl Reader {
     }
     pub(crate) fn session_tab(&self, cx: &App) -> glim_core::update::SessionTab {
         use glim_core::update::SessionTab;
-        if let (Some(root), Some(commit)) = (&self.repository_root, &self.commit_id) {
-            return SessionTab::Commit {
-                root: root.clone(),
-                commit: commit.clone(),
-                file: self.commit_file.clone(),
-            };
-        }
-        if let (Some(root), Some(change)) = (&self.repository_root, &self.diff) {
-            return SessionTab::Diff {
-                root: root.clone(),
-                change: change.clone(),
-                side_by_side: self.side_by_side(),
-            };
-        }
         if let Renderer::Native(native) = &self.renderer
             && let Some(shuffle) = native.read(cx).playlist_shuffle()
         {
@@ -328,12 +429,9 @@ impl Reader {
             title: path.display().to_string().into(),
             path,
             snapshot,
-            repository_root: None,
-            diff: None,
-            historical: false,
-            commit_id: None,
-            commit_file: None,
             structured_controls: None,
+            draft_directory: None,
+            recovery_key: None,
             json: None,
             csv,
             renderer: Renderer::Paged {
@@ -347,68 +445,6 @@ impl Reader {
         reader.restore_csv_preview(cx);
         reader
     }
-    pub fn from_commit(
-        path: PathBuf,
-        text: String,
-        commit_file: Option<PathBuf>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self {
-        let (content, spans) = glim_core::commit_content(&text);
-        let source = SourceReader::new(
-            &content,
-            "plain",
-            true,
-            spans,
-            ScrollHandle::new(),
-            window,
-            cx,
-        );
-        let split = glim_core::split_diff::split_commit_patch(&text)
-            .map(|patch| cx.new(|cx| crate::views::split_diff::SplitDiff::new(patch, window, cx)));
-        let side_by_side = split.is_some()
-            && cx
-                .try_global::<crate::app::ReaderPreferences>()
-                .and_then(|p| p.diff_side_by_side)
-                .unwrap_or(commit_file.is_some());
-        let root = path.parent().map(ToOwned::to_owned);
-        let commit_id = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .and_then(|n| n.strip_prefix("Commit "))
-            .map(str::to_owned);
-        Self {
-            title: commit_file
-                .as_ref()
-                .map_or_else(
-                    || path.display().to_string(),
-                    |file| {
-                        format!(
-                            "{} · {}",
-                            file.display(),
-                            path.file_name().unwrap_or_default().to_string_lossy()
-                        )
-                    },
-                )
-                .into(),
-            path,
-            snapshot: text,
-            repository_root: root,
-            diff: None,
-            historical: true,
-            commit_id,
-            commit_file,
-            structured_controls: None,
-            json: None,
-            csv: None,
-            renderer: Renderer::Diff(DiffReader {
-                source,
-                split,
-                side_by_side,
-                notice: None,
-            }),
-        }
-    }
     #[cfg(test)]
     pub fn from_bytes(
         document: glim_services::binary::BytePreview,
@@ -419,7 +455,6 @@ impl Reader {
             &document.text,
             "plain",
             true,
-            Vec::new(),
             ScrollHandle::new(),
             window,
             cx,
@@ -428,42 +463,12 @@ impl Reader {
             title: document.path.display().to_string().into(),
             path: document.path,
             snapshot: document.text,
-            repository_root: None,
-            diff: None,
-            historical: false,
-            commit_id: None,
-            commit_file: None,
             structured_controls: None,
+            draft_directory: None,
+            recovery_key: None,
             json: None,
             csv: None,
             renderer: Renderer::Source(source),
-        }
-    }
-    pub fn from_diff(
-        document: DiffDocument,
-        root: &std::path::Path,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self {
-        let renderer = Renderer::Diff(DiffReader::new(&document, window, cx));
-        Self {
-            title: format!(
-                "{} · {}",
-                document.change.path.display(),
-                document.change.scope.label()
-            )
-            .into(),
-            path: root.join(&document.change.path),
-            snapshot: document.patch,
-            repository_root: Some(root.to_path_buf()),
-            diff: Some(document.change),
-            historical: false,
-            commit_id: None,
-            commit_file: None,
-            structured_controls: None,
-            json: None,
-            csv: None,
-            renderer,
         }
     }
     pub fn from_image(
@@ -492,12 +497,9 @@ impl Reader {
             title: document.path.display().to_string().into(),
             path: document.path,
             snapshot: document.fingerprint,
-            repository_root: None,
-            diff: None,
-            historical: false,
-            commit_id: None,
-            commit_file: None,
             structured_controls: None,
+            draft_directory: None,
+            recovery_key: None,
             json: None,
             csv: None,
             renderer,
@@ -516,12 +518,9 @@ impl Reader {
             title: path.display().to_string().into(),
             path,
             snapshot: fingerprint,
-            repository_root: None,
-            diff: None,
-            historical: false,
-            commit_id: None,
-            commit_file: None,
             structured_controls: None,
+            draft_directory: None,
+            recovery_key: None,
             json: None,
             csv: None,
             renderer: Renderer::Book(view, writing),
@@ -542,12 +541,9 @@ impl Reader {
             title: document.path.display().to_string().into(),
             path: document.path.clone(),
             snapshot: document.fingerprint.clone(),
-            repository_root: None,
-            diff: None,
-            historical: false,
-            commit_id: None,
-            commit_file: None,
             structured_controls: None,
+            draft_directory: None,
+            recovery_key: None,
             json: None,
             csv: None,
             renderer: Renderer::XMind(cx.new(|_| xmind::XMindReader::new(document))),
@@ -558,12 +554,9 @@ impl Reader {
             title: document.path.display().to_string().into(),
             path: document.path.clone(),
             snapshot: document.fingerprint.clone(),
-            repository_root: None,
-            diff: None,
-            historical: false,
-            commit_id: None,
-            commit_file: None,
             structured_controls: None,
+            draft_directory: None,
+            recovery_key: None,
             json: None,
             csv: None,
             renderer: Renderer::Opml(cx.new(|_| opml::OpmlReader::new(document))),
@@ -575,12 +568,9 @@ impl Reader {
             title: path.display().to_string().into(),
             path,
             snapshot: String::new(),
-            repository_root: None,
-            diff: None,
-            historical: false,
-            commit_id: None,
-            commit_file: None,
             structured_controls: None,
+            draft_directory: None,
+            recovery_key: None,
             json: None,
             csv: None,
             renderer,
@@ -631,14 +621,10 @@ impl Reader {
         match &self.renderer {
             Renderer::Source(s) => Some(s),
             Renderer::Markup(m) => Some(&m.source),
-            Renderer::Diff(d) => Some(&d.source),
             _ => None,
         }
     }
     pub fn editor(&self) -> Option<Entity<gpui_kit::component::input::EditorState>> {
-        if self.diff.is_some() {
-            return None;
-        }
         match &self.renderer {
             Renderer::Source(s) if !s.is_readonly() => Some(s.state.clone()),
             Renderer::Markup(m) => Some(m.source.state.clone()),
@@ -737,14 +723,6 @@ impl Reader {
                 s.preview = o.preview;
                 s.inherit_preview_scroll(o, cx);
             }
-            (Renderer::Diff(s), Renderer::Diff(o)) => {
-                s.source.inherit(&o.source, cx);
-                s.side_by_side = o.side_by_side && s.split.is_some();
-                if let (Some(new), Some(old)) = (&s.split, &o.split) {
-                    let offset = old.read(cx).offset(cx);
-                    new.update(cx, |v, cx| v.restore_offset(offset, cx));
-                }
-            }
             _ => {}
         }
     }
@@ -758,11 +736,6 @@ impl Reader {
                 .state
                 .update(cx, |s, cx| s.set_soft_wrap(enabled, window, cx));
         }
-        if let Renderer::Diff(diff) = &self.renderer
-            && let Some(split) = &diff.split
-        {
-            split.update(cx, |s, cx| s.set_word_wrap(enabled, window, cx));
-        }
     }
 
     pub fn horizontal_offsets(&self, cx: &App) -> Option<Vec<Pixels>> {
@@ -775,9 +748,6 @@ impl Reader {
             Renderer::Paged { .. } => None,
             Renderer::Markup(m) if m.preview && m.html => None,
             Renderer::Markup(m) if m.preview => Some(vec![m.scroll.offset().x]),
-            Renderer::Diff(d) if d.side_by_side => {
-                d.split.as_ref().map(|s| s.read(cx).horizontal_offsets(cx))
-            }
             _ => Some(
                 self.source()
                     .map(|s| vec![s.state.read(cx).scroll_offset().x])
@@ -791,30 +761,6 @@ impl Reader {
             source.state.update(cx, |s, cx| s.focus(window, cx));
         }
     }
-    pub fn history_summary(&self) -> Option<(String, String)> {
-        if !self.historical {
-            return None;
-        }
-        let header = self.snapshot.split("\ndiff --git ").next().unwrap_or("");
-        let subject = header
-            .lines()
-            .find_map(|line| {
-                line.strip_prefix("    ")
-                    .filter(|line| !line.trim().is_empty())
-            })
-            .unwrap_or("Commit changes");
-        let author = header
-            .lines()
-            .find_map(|line| line.strip_prefix("Author:"))
-            .map(|author| author.trim().split(" <").next().unwrap_or(author))
-            .unwrap_or("");
-        let id = self.commit_id.as_deref().unwrap_or("");
-        Some((
-            subject.to_owned(),
-            format!("{} · {}", author, &id[..8.min(id.len())]),
-        ))
-    }
-
     pub fn is_csv(&self) -> bool {
         self.csv.is_some()
             && self.path.extension().is_some_and(|extension| {
@@ -970,17 +916,6 @@ impl Reader {
             "Preview"
         }
     }
-    pub fn split_available(&self) -> bool {
-        matches!(&self.renderer, Renderer::Diff(d) if d.split.is_some())
-    }
-    pub fn side_by_side(&self) -> bool {
-        matches!(&self.renderer, Renderer::Diff(d) if d.side_by_side)
-    }
-    pub fn set_side_by_side(&mut self, enabled: bool) {
-        if let Renderer::Diff(d) = &mut self.renderer {
-            d.side_by_side = enabled && d.split.is_some();
-        }
-    }
     pub fn reveal_anchor(&mut self, anchor: &str, cx: &mut App) {
         if let Renderer::Paged {
             html: Some((browser, _)),
@@ -1013,7 +948,7 @@ impl Reader {
         }
         let _scope = glim_services::diagnostics::FileScope::enter(&self.path, "render");
         let content = self.render_content(open, cx);
-        let content = if self.diff.is_none() && glim_services::graph::supports(&self.path) {
+        let content = if glim_services::graph::supports(&self.path) {
             if self.structured_controls.is_none() {
                 let editor = match &self.renderer {
                     Renderer::Source(source) => Some(source.state.clone()),
@@ -1053,7 +988,6 @@ impl Reader {
         match &mut self.renderer {
             Renderer::Source(s) => s.render(cx),
             Renderer::Markup(m) => m.render(open, cx),
-            Renderer::Diff(d) => d.render(cx),
             Renderer::Image(i) => i.render(cx),
             Renderer::Gif(view) => {
                 view.update(cx, |view, cx| view.set_active(true, cx));
@@ -1080,10 +1014,18 @@ impl Reader {
     }
 }
 
+pub(crate) fn resource_snapshot() -> (i32, [u64; 16]) {
+    native_bridge::resource_snapshot()
+}
+
+pub(crate) fn set_native_telemetry_enabled(enabled: bool) {
+    native_bridge::set_telemetry_enabled(enabled);
+}
+
 #[cfg(test)]
 mod editing_tests {
     use super::{Reader, Renderer};
-    use glim_core::{DiffDocument, DiffScope, Document, DocumentKind, GitChange};
+    use glim_core::{Document, DocumentKind};
     use gpui_kit::{
         App, AppContext, Bounds, Context, Entity, IntoElement, Point, Render, TestAppContext,
         Window, WindowBounds, WindowOptions, px, size, test::TestWindowExt,
@@ -1114,6 +1056,57 @@ mod editing_tests {
             )
             .unwrap()
         })
+    }
+    #[gpui_kit::test]
+    fn first_save_retains_live_edits_and_recovery_until_latest_contents_are_saved(
+        cx: &mut TestAppContext,
+    ) {
+        let (handle, view) = open(cx, |window, cx| {
+            Reader::untitled(std::env::temp_dir(), window, cx)
+        });
+        let editor = cx.update(|cx| view.read(cx).0.editor().unwrap());
+        cx.update_window(handle, |_, window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.replace_all("saved snapshot\nnewer input", window, cx)
+            });
+            view.update(cx, |view, cx| {
+                view.0.bind_saved_draft(
+                    std::env::temp_dir().join("first-save.txt"),
+                    "saved snapshot".into(),
+                    window,
+                    cx,
+                )
+            });
+        })
+        .unwrap();
+        cx.update(|cx| {
+            let reader = &view.read(cx).0;
+            assert_eq!(reader.editor().unwrap().entity_id(), editor.entity_id());
+            assert_eq!(
+                editor.read(cx).value().as_ref(),
+                "saved snapshot\nnewer input"
+            );
+            assert!(reader.is_dirty());
+            assert!(reader.draft_directory.is_none());
+            assert!(reader.recovery_key.is_some());
+            assert_eq!(reader.snapshot, "saved snapshot");
+        });
+    }
+    #[gpui_kit::test]
+    fn recovered_notes_are_dirty_and_keep_their_original_content(cx: &mut TestAppContext) {
+        let (_, view) = open(cx, |window, cx| {
+            let mut reader = Reader::untitled(std::env::temp_dir(), window, cx);
+            reader.restore_draft_text("Recovered 中文\r\ntext".into(), window, cx);
+            reader
+        });
+        cx.update(|cx| {
+            let reader = &view.read(cx).0;
+            assert!(reader.is_dirty());
+            assert_eq!(
+                reader.editor().unwrap().read(cx).value().as_ref(),
+                "Recovered 中文\r\ntext"
+            );
+        });
     }
     #[gpui_kit::test]
     fn source_right_click_does_not_reborrow_editor(cx: &mut TestAppContext) {
@@ -1210,44 +1203,6 @@ mod editing_tests {
             window.click(("input", editor.entity_id()), cx);
             window.press("secondary-a", cx);
             window.input("must not overwrite binary bytes", cx);
-        })
-        .unwrap();
-        cx.run_until_parked();
-        cx.update(|cx| {
-            assert_eq!(editor.read(cx).value(), original);
-            assert!(view.read(cx).0.editor().is_none());
-            assert!(!view.read(cx).0.is_dirty());
-        });
-    }
-
-    #[gpui_kit::test]
-    fn diff_rejects_typing_and_has_no_save_buffer(cx: &mut TestAppContext) {
-        let (handle, view) = open(cx, |window, cx| {
-            let mut reader = Reader::from_diff(
-                DiffDocument {
-                    change: GitChange {
-                        path: "text.txt".into(),
-                        original_path: None,
-                        scope: DiffScope::Worktree,
-                        status: 'M',
-                    },
-                    patch: "@@ -1 +1 @@\n-old\n+new\n".into(),
-                },
-                std::path::Path::new("/tmp"),
-                window,
-                cx,
-            );
-            reader.set_side_by_side(false);
-            reader
-        });
-        let editor = cx.update(|cx| view.read(cx).0.source().unwrap().state.clone());
-        let original = cx.update(|cx| editor.read(cx).value());
-        cx.update_window(handle, |_, window, cx| {
-            window.render_frame(cx);
-            window.right_click(("input", editor.entity_id()), cx);
-            window.click(("input", editor.entity_id()), cx);
-            window.press("secondary-a", cx);
-            window.input("must not replace the diff", cx);
         })
         .unwrap();
         cx.run_until_parked();

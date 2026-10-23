@@ -153,14 +153,58 @@ pub fn clear_session() -> Result<()> {
 pub fn take_session(current_build: &str) -> Result<Option<UpdateSession>> {
     take_session_at(&state_directory()?, current_build)
 }
+// Older releases could checkpoint Git-only tabs. Retiring those readers must
+// not reject the whole window and lose the ordinary file tabs during upgrade.
+fn read_session(reader: impl Read) -> Result<UpdateSession> {
+    let mut value: serde_json::Value = serde_json::from_reader(reader)?;
+    if value.get("schema").and_then(|v| v.as_u64()) == Some(1)
+        && let Some(workspaces) = value.get_mut("workspaces").and_then(|v| v.as_array_mut())
+    {
+        for workspace in workspaces {
+            let old_active = workspace.get("active").and_then(|v| v.as_u64());
+            let Some(tabs) = workspace.get_mut("tabs").and_then(|v| v.as_array_mut()) else {
+                continue;
+            };
+            if let Some(active) = old_active {
+                ensure!(active < tabs.len() as u64, "Invalid active tab");
+            }
+            let retained = tabs
+                .iter()
+                .enumerate()
+                .filter_map(|(index, tab)| {
+                    (!matches!(
+                        tab.get("kind").and_then(|v| v.as_str()),
+                        Some("diff" | "commit")
+                    ))
+                    .then_some(index)
+                })
+                .collect::<Vec<_>>();
+            let active = old_active.and_then(|active| {
+                retained
+                    .iter()
+                    .position(|index| *index as u64 >= active)
+                    .or_else(|| retained.len().checked_sub(1))
+            });
+            let mut index = 0;
+            tabs.retain(|_| {
+                let keep = retained.binary_search(&index).is_ok();
+                index += 1;
+                keep
+            });
+            if old_active.is_some() {
+                workspace["active"] = serde_json::to_value(active)?;
+            }
+        }
+    }
+    Ok(serde_json::from_value(value)?)
+}
 fn take_session_at(directory: &Path, current_build: &str) -> Result<Option<UpdateSession>> {
     let path = directory.join("update-session.json");
     if !path.is_file() {
         return Ok(None);
     }
     let read = || -> Result<UpdateSession> {
-        let session: UpdateSession =
-            serde_json::from_reader(std::io::BufReader::new(fs::File::open(&path)?))?;
+        let session = read_session(std::io::BufReader::new(fs::File::open(&path)?))?;
         validate_session(&session)?;
         Ok(session)
     };
@@ -184,6 +228,34 @@ fn take_session_at(directory: &Path, current_build: &str) -> Result<Option<Updat
 mod tests {
     use super::*;
     use glim_core::update::{SessionTab, WorkspaceSession};
+    #[test]
+    fn upgrading_legacy_tabs_preserves_files_and_remaps_active() -> Result<()> {
+        let input = serde_json::json!({"schema":1,"source_build":"30","target_build":"31","workspaces":[
+            {"roots":["/project"],"tabs":[
+                {"kind":"diff","root":"/project"},
+                {"kind":"file","path":"/project/note.md","preview":true},
+                {"kind":"commit","root":"/project"},
+                {"kind":"playlist","path":"/project/music","shuffle":false}
+            ],"active":3}
+        ]});
+        let session = read_session(input.to_string().as_bytes())?;
+        validate_session(&session)?;
+        assert_eq!(session.workspaces[0].tabs.len(), 2);
+        assert_eq!(session.workspaces[0].active, Some(1));
+        assert!(
+            matches!(&session.workspaces[0].tabs[0], SessionTab::File { path, .. } if path == Path::new("/project/note.md"))
+        );
+        let mut retired_active = input.clone();
+        retired_active["workspaces"][0]["active"] = 2.into();
+        assert_eq!(
+            read_session(retired_active.to_string().as_bytes())?.workspaces[0].active,
+            Some(1)
+        );
+        let mut invalid = input;
+        invalid["workspaces"][0]["tabs"][0]["kind"] = "unknown".into();
+        assert!(read_session(invalid.to_string().as_bytes()).is_err());
+        Ok(())
+    }
     #[test]
     fn checkpoint_recovers_failed_installs_and_is_consumed_once_after_upgrade() -> Result<()> {
         let directory = tempfile::tempdir()?;

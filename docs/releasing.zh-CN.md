@@ -9,7 +9,7 @@
 | macOS Apple Silicon — `aarch64-apple-darwin` | Rust、包含 Swift 的 Apple Command Line Tools、Python 3 |
 | macOS Intel — `x86_64-apple-darwin` | 同样的 macOS 工具及目标工具链 |
 
-Rust 版本以 [CI](../.github/workflows/ci.yml) 固定值为准。Git 使用本机可执行文件。当前仅维护并打包 macOS Apple Silicon 与 Intel；构建脚本拒绝非 macOS 目标，既有公开附件继续保留。
+Rust 版本以 [CI](../.github/workflows/ci.yml) 固定值为准。当前仅维护并打包 macOS Apple Silicon 与 Intel；构建脚本拒绝非 macOS 目标，既有公开附件继续保留。
 
 ## 开发与验证
 

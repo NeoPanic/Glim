@@ -14,6 +14,9 @@ impl Workspace {
         if enabled == self.file_fullscreen {
             return;
         }
+        let mut props = self.usage_context();
+        props.push(("enabled", glim_services::telemetry::flag(enabled)));
+        glim_services::telemetry::track("reader_fullscreen_changed", props);
         if enabled {
             self.file_fullscreen_seen_window = window.is_fullscreen();
             self.file_fullscreen_entered_window = !window.is_fullscreen();
@@ -133,6 +136,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let mut props = self.usage_context();
+        props.push(("action", glim_services::telemetry::text(action.id())));
+        glim_services::telemetry::track("reader_action", props);
         match action {
             ToolbarAction::Sidebar => {
                 self.sidebar_visible = !self.sidebar_visible;
@@ -144,19 +150,6 @@ impl Workspace {
             ToolbarAction::Preview | ToolbarAction::Source => {
                 if self.active_reader().is_some_and(|r| r.can_preview()) {
                     self.set_reader_preview(matches!(action, ToolbarAction::Preview), window, cx);
-                }
-            }
-            ToolbarAction::SideBySide | ToolbarAction::Inline => {
-                if self
-                    .active_reader()
-                    .is_some_and(|r| r.diff.is_some() || r.historical)
-                {
-                    self.set_diff_mode(matches!(action, ToolbarAction::SideBySide), cx);
-                }
-            }
-            ToolbarAction::ViewFile => {
-                if let Some(reader) = self.active_reader().filter(|r| r.diff.is_some()) {
-                    self.open_path(reader.path.clone(), window, cx);
                 }
             }
             ToolbarAction::WordWrap => {

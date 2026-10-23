@@ -43,6 +43,24 @@ impl UpdateState {
             && let Ok(snapshot) = native.snapshot()
             && self.snapshot != snapshot
         {
+            if self.snapshot.phase != snapshot.phase {
+                let phase = match snapshot.phase.as_str() {
+                    "checking" => "checking",
+                    "available" => "available",
+                    "current" => "current",
+                    "downloading" => "downloading",
+                    "extracting" => "extracting",
+                    "ready" => "ready",
+                    "installing" => "installing",
+                    "error" => "error",
+                    "cancelled" => "cancelled",
+                    _ => "other",
+                };
+                glim_services::telemetry::track(
+                    "update_phase_changed",
+                    [("phase", glim_services::telemetry::text(phase))],
+                );
+            }
             let cancelled = snapshot.phase == "cancelled" && self.snapshot.phase != "cancelled";
             self.snapshot = snapshot;
             if self.manual_check
@@ -433,6 +451,17 @@ pub(crate) fn checking(cx: &App) -> bool {
     state(cx).is_some_and(|s| s.read(cx).manual_check || s.read(cx).snapshot.phase == "checking")
 }
 pub(crate) fn command(command: &str, cx: &mut App) {
+    let action = match command {
+        "check" => "check",
+        "download" => "download",
+        "cancel" => "cancel",
+        "install" => "install",
+        _ => "other",
+    };
+    glim_services::telemetry::track(
+        "update_action",
+        [("action", glim_services::telemetry::text(action))],
+    );
     let Some(state) = state(cx) else { return };
     state.update(cx, |state, cx| {
         if state.exiting {
@@ -531,7 +560,7 @@ fn set_locked(locked: bool, cx: &mut App) {
     cx.set_global(UpdateInstallLock(locked));
     for (view, _) in super::OpenWorkspaces::windows(cx) {
         if let Some(view) = view.upgrade() {
-            view.update(cx, |v, cx| v.set_git_editing_locked(locked, cx));
+            view.update(cx, |v, cx| v.set_editing_locked(locked, cx));
         }
     }
 }

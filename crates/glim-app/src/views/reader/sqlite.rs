@@ -92,6 +92,18 @@ impl TableDelegate for Grid {
         let owner = self.owner.clone();
         cx.defer(move |cx| {
             let _ = owner.update(cx, |view, cx| {
+                glim_services::telemetry::reader_feature(
+                    "sqlite",
+                    "sort",
+                    [(
+                        "direction",
+                        glim_services::telemetry::text(match sort {
+                            ColumnSort::Default => "default",
+                            ColumnSort::Ascending => "ascending",
+                            ColumnSort::Descending => "descending",
+                        }),
+                    )],
+                );
                 view.query.sort = match sort {
                     ColumnSort::Default => None,
                     ColumnSort::Ascending => Some((col - 1, false)),
@@ -138,9 +150,7 @@ pub(super) struct SqliteReader {
     grid: Entity<TableState<Grid>>,
     search: Entity<InputState>,
     table_search: Entity<InputState>,
-    column_filter: Entity<InputState>,
     page_input: Entity<InputState>,
-    filter_column: usize,
     total: Option<u64>,
     more: bool,
     error: Option<String>,
@@ -171,38 +181,42 @@ impl SqliteReader {
             .cell_selectable(true)
             .row_header(false)
         });
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder(tr("Filter all rows…")));
+        let search = cx
+            .new(|cx| InputState::new(window, cx).placeholder(tr("Search all rows and columns…")));
         let table_search =
             cx.new(|cx| InputState::new(window, cx).placeholder(tr("Filter tables…")));
-        let column_filter =
-            cx.new(|cx| InputState::new(window, cx).placeholder(tr("Filter selected column…")));
         let page_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr("Go to page")));
         let mut subscriptions =
             vec![cx.subscribe(&table_search, |_, _, _: &InputEvent, cx| cx.notify())];
-        for input in [&search, &column_filter] {
-            subscriptions.push(cx.subscribe(input, |view, _, event, cx| {
-                if matches!(event, InputEvent::Change) {
-                    view.debounce = Some(cx.spawn(async |view, cx| {
-                        cx.background_executor()
-                            .timer(std::time::Duration::from_millis(250))
-                            .await;
-                        let _ = view.update(cx, |view, cx| {
-                            view.query.search = view.search.read(cx).value().to_string();
-                            view.query.filter = Some((
-                                view.filter_column,
-                                view.column_filter.read(cx).value().to_string(),
-                            ));
-                            view.query.page = 0;
-                            view.reload(cx);
-                        });
-                    }));
-                }
-            }));
-        }
+        subscriptions.push(cx.subscribe(&search, |view, _, event, cx| {
+            if matches!(event, InputEvent::Change) {
+                view.debounce = Some(cx.spawn(async |view, cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(250))
+                        .await;
+                    let _ = view.update(cx, |view, cx| {
+                        glim_services::telemetry::reader_feature(
+                            "sqlite",
+                            "filter_applied",
+                            [(
+                                "global_filter",
+                                glim_services::telemetry::flag(
+                                    !view.search.read(cx).value().is_empty(),
+                                ),
+                            )],
+                        );
+                        view.query.search = view.search.read(cx).value().to_string();
+                        view.query.page = 0;
+                        view.reload(cx);
+                    });
+                }));
+            }
+        }));
         subscriptions.push(cx.subscribe(&page_input, |view, _, event, cx| {
             if matches!(event, InputEvent::PressEnter { .. })
                 && let Ok(page) = view.page_input.read(cx).value().parse::<usize>()
             {
+                glim_services::telemetry::reader_feature("sqlite", "jump_page", []);
                 view.query.page = page.saturating_sub(1).min(
                     view.last_page()
                         .unwrap_or(i64::MAX as usize / limits::SQLITE_PAGE_ROWS),
@@ -214,18 +228,6 @@ impl SqliteReader {
             &grid,
             window,
             |view, _, event, window, cx| match event {
-                TableEvent::SelectCell(_, col) | TableEvent::SelectColumn(col) if *col > 0 => {
-                    if view.filter_column != col - 1 {
-                        view.filter_column = col - 1;
-                        let text = view.column_filter.read(cx).value().to_string();
-                        view.query.filter = Some((view.filter_column, text.clone()));
-                        if !text.is_empty() {
-                            view.query.page = 0;
-                            view.reload(cx);
-                        }
-                    }
-                    cx.notify();
-                }
                 TableEvent::DoubleClickedCell(row, col) if *col > 0 => {
                     view.load_value(*row, col - 1, 0, window, cx)
                 }
@@ -233,12 +235,14 @@ impl SqliteReader {
             },
         ));
         let (cancel, guard) = Cancellation::task();
+        let telemetry_started = std::time::Instant::now();
         let work = cx
             .background_executor()
             .spawn(async move { browser::open(&path, &cancel) });
         let task = cx.spawn(async move |view, cx| {
             let _guard = guard;
             let result = work.await;
+            glim_services::telemetry::result("sqlite_open", None, telemetry_started, &result);
             let _ = view.update(cx, |view, cx| {
                 view.task = None;
                 match result {
@@ -264,9 +268,7 @@ impl SqliteReader {
             grid,
             search,
             table_search,
-            column_filter,
             page_input,
-            filter_column: 0,
             total: None,
             more: false,
             error: None,
@@ -284,6 +286,7 @@ impl SqliteReader {
             .map(|n| n.saturating_sub(1) as usize / limits::SQLITE_PAGE_ROWS)
     }
     fn select_table(&mut self, cx: &mut Context<Self>) {
+        glim_services::telemetry::track("sqlite_table_selected", []);
         self.task = None;
         self.count_task = None;
         self.detail = None;
@@ -304,8 +307,6 @@ impl SqliteReader {
             grid.busy = true;
             state.refresh(cx);
         });
-        self.query.filter = Some((0, self.column_filter.read(cx).value().to_string()));
-        self.filter_column = 0;
         let Some(db) = self.database.clone() else {
             return;
         };
@@ -320,12 +321,14 @@ impl SqliteReader {
         self.debounce = None;
         self.query.search = self.search.read(cx).value().to_string();
         let (cancel, guard) = Cancellation::task();
+        let telemetry_started = std::time::Instant::now();
         let work = cx
             .background_executor()
             .spawn(async move { db.columns(&table, &cancel) });
         self.task = Some(cx.spawn(async move |view, cx| {
             let _guard = guard;
             let result = work.await;
+            glim_services::telemetry::result("sqlite_columns", None, telemetry_started, &result);
             let _ = view.update(cx, |view, cx| {
                 view.task = None;
                 match result {
@@ -370,12 +373,14 @@ impl SqliteReader {
         };
         let query = self.query.clone();
         let (cancel, guard) = Cancellation::task();
+        let telemetry_started = std::time::Instant::now();
         let work = cx
             .background_executor()
             .spawn(async move { db.count(&query, &cancel) });
         self.count_task = Some(cx.spawn(async move |view, cx| {
             let _guard = guard;
             let result = work.await;
+            glim_services::telemetry::result("sqlite_count", None, telemetry_started, &result);
             let _ = view.update(cx, |view, cx| {
                 view.count_task = None;
                 match result {
@@ -387,9 +392,31 @@ impl SqliteReader {
         }));
     }
     fn load_page(&mut self, cx: &mut Context<Self>) {
+        glim_services::telemetry::track(
+            "sqlite_page_requested",
+            [
+                (
+                    "page_index",
+                    glim_services::telemetry::number(self.query.page as u64),
+                ),
+                (
+                    "column_offset",
+                    glim_services::telemetry::number(self.query.start_column as u64),
+                ),
+                (
+                    "has_search",
+                    glim_services::telemetry::flag(!self.query.search.is_empty()),
+                ),
+                (
+                    "has_sort",
+                    glim_services::telemetry::flag(self.query.sort.is_some()),
+                ),
+            ],
+        );
         self.task = None;
         self.error = None;
         self.detail = None;
+        glim_services::telemetry::reader_feature("sqlite", "cell_detail", []);
         self.detail_task = None;
         let Some(db) = self.database.clone() else {
             return;
@@ -406,12 +433,14 @@ impl SqliteReader {
         let query = self.query.clone();
         let offset = query.page.saturating_mul(limits::SQLITE_PAGE_ROWS);
         let (cancel, guard) = Cancellation::task();
+        let telemetry_started = std::time::Instant::now();
         let work = cx
             .background_executor()
             .spawn(async move { db.page(&query, &cancel) });
         self.task = Some(cx.spawn(async move |view, cx| {
             let _guard = guard;
             let result = work.await;
+            glim_services::telemetry::result("sqlite_page_load", None, telemetry_started, &result);
             let _ = view.update(cx, |view, cx| {
                 view.task = None;
                 view.grid.update(cx, |s, cx| {
@@ -424,7 +453,10 @@ impl SqliteReader {
                             d.offset = offset;
                             view.more = page.more;
                         }
-                        Err(error) => view.error = Some(error.to_string()),
+                        Err(error) => {
+                            glim_services::telemetry::operation_failed("sqlite_load", None, &error);
+                            view.error = Some(error.to_string());
+                        }
                     }
                     cx.notify();
                 });
@@ -447,12 +479,14 @@ impl SqliteReader {
         };
         let query = self.query.clone();
         let (cancel, guard) = Cancellation::task();
+        let telemetry_started = std::time::Instant::now();
         let work = cx
             .background_executor()
             .spawn(async move { db.value(&query, row, column, offset, &cancel) });
         self.detail_task = Some(cx.spawn_in(window, async move |view, cx| {
             let _guard = guard;
             let result = work.await;
+            glim_services::telemetry::result("sqlite_value_load", None, telemetry_started, &result);
             let _ = view.update_in(cx, |view, window, cx| {
                 view.detail_task = None;
                 match result {
@@ -466,14 +500,16 @@ impl SqliteReader {
                                 &text,
                                 "text",
                                 true,
-                                vec![],
                                 ScrollHandle::new(),
                                 window,
                                 cx,
                             ),
                         })
                     }
-                    Err(error) => view.error = Some(error.to_string()),
+                    Err(error) => {
+                        glim_services::telemetry::operation_failed("sqlite_load", None, &error);
+                        view.error = Some(error.to_string());
+                    }
                 }
                 cx.notify();
             });
@@ -497,24 +533,12 @@ impl Render for SqliteReader {
             .min_h_0()
             .h_full()
             .child(
-                h_flex()
-                    .gap_2()
-                    .p_2()
-                    .child(div().flex_1().child(Input::new(&self.search).small()))
-                    .child(
-                        div().max_w(px(180.)).truncate().child(
-                            self.query
-                                .columns
-                                .get(self.filter_column)
-                                .cloned()
-                                .unwrap_or_default(),
-                        ),
-                    )
-                    .child(
-                        div()
-                            .w(px(160.))
-                            .child(Input::new(&self.column_filter).small()),
-                    ),
+                h_flex().gap_2().p_2().child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Input::new(&self.search).small()),
+                ),
             )
             .when_some(self.error.clone(), |el, error| {
                 el.child(div().px_2().text_color(cx.theme().danger).child(error))
@@ -525,6 +549,11 @@ impl Render for SqliteReader {
                         .label(tr("Retry with more time"))
                         .disabled(self.database.is_none())
                         .on_click(cx.listener(|v, _, _, cx| {
+                            glim_services::telemetry::reader_feature(
+                                "sqlite",
+                                "extend_query_timeout",
+                                [],
+                            );
                             v.query.seconds = v
                                 .query
                                 .seconds
@@ -555,6 +584,11 @@ impl Render for SqliteReader {
                             .label("|‹")
                             .disabled(busy || self.query.page == 0)
                             .on_click(cx.listener(|v, _, _, cx| {
+                                glim_services::telemetry::reader_feature(
+                                    "sqlite",
+                                    "first_page",
+                                    [],
+                                );
                                 v.query.page = 0;
                                 v.load_page(cx);
                             })),
@@ -564,6 +598,11 @@ impl Render for SqliteReader {
                             .label("‹")
                             .disabled(busy || self.query.page == 0)
                             .on_click(cx.listener(|v, _, _, cx| {
+                                glim_services::telemetry::reader_feature(
+                                    "sqlite",
+                                    "previous_page",
+                                    [],
+                                );
                                 v.query.page = v.query.page.saturating_sub(1);
                                 v.load_page(cx);
                             })),
@@ -580,6 +619,7 @@ impl Render for SqliteReader {
                             .label("›")
                             .disabled(busy || !self.more)
                             .on_click(cx.listener(|v, _, _, cx| {
+                                glim_services::telemetry::reader_feature("sqlite", "next_page", []);
                                 v.query.page += 1;
                                 v.load_page(cx);
                             })),
@@ -589,6 +629,7 @@ impl Render for SqliteReader {
                             .label("›|")
                             .disabled(busy || last.is_none() || last == Some(self.query.page))
                             .on_click(cx.listener(|v, _, _, cx| {
+                                glim_services::telemetry::reader_feature("sqlite", "last_page", []);
                                 v.query.page = v.last_page().unwrap_or(v.query.page);
                                 v.load_page(cx);
                             })),

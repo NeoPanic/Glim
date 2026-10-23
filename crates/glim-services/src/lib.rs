@@ -3,12 +3,12 @@
 pub mod binary;
 pub mod csv;
 pub mod diagnostics;
+pub mod drafts;
 pub mod executables;
 pub mod files;
 pub mod formats;
 mod fragmented_mp4;
 pub mod geo;
-pub mod git;
 pub mod graph;
 pub mod inline_images;
 pub mod json;

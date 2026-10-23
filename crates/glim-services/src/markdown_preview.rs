@@ -16,6 +16,13 @@ use std::{
 /// Accept blank lines between explicit, matching pipe-table rows in preview only.
 /// AST block ranges keep code, HTML, math and frontmatter examples untouched.
 pub fn normalize_tables(text: &str) -> std::borrow::Cow<'_, str> {
+    normalize_tables_with_mapping(text).0
+}
+
+/// Preview-only omissions expressed in original source bytes.
+pub fn normalize_tables_with_mapping(
+    text: &str,
+) -> (std::borrow::Cow<'_, str>, Vec<std::ops::Range<usize>>) {
     use std::{borrow::Cow, ops::Range};
     // The repair only removes blank lines between explicit pipe rows. Ordinary
     // tables need no AST pass; false-positive candidates still use the parser
@@ -35,14 +42,14 @@ pub fn normalize_tables(text: &str) -> std::borrow::Cow<'_, str> {
         candidate
     });
     if !candidate {
-        return Cow::Borrowed(text);
+        return (Cow::Borrowed(text), Vec::new());
     }
     let mut options = ParseOptions::gfm();
     options.constructs.math_flow = true;
     options.constructs.math_text = true;
     options.constructs.frontmatter = true;
     let Ok(Node::Root(root)) = markdown::to_mdast(text, &options) else {
-        return Cow::Borrowed(text);
+        return (Cow::Borrowed(text), Vec::new());
     };
     let mut blocks = root
         .children
@@ -112,16 +119,16 @@ pub fn normalize_tables(text: &str) -> std::borrow::Cow<'_, str> {
         index = previous + 1;
     }
     if removed.is_empty() {
-        return Cow::Borrowed(text);
+        return (Cow::Borrowed(text), Vec::new());
     }
     let mut output = String::with_capacity(text.len());
     let mut start = 0;
-    for range in removed {
+    for range in &removed {
         output.push_str(&text[start..range.start]);
         start = range.end;
     }
     output.push_str(&text[start..]);
-    Cow::Owned(output)
+    (Cow::Owned(output), removed)
 }
 
 fn pipe_cells(line: &str) -> Option<Vec<&str>> {

@@ -1,8 +1,9 @@
-<p align="center"><img src="assets/branding/repository-banner.svg" alt="Glim — All-purpose file viewer for Mac. Documents, data, images and code in one workspace. Free and open source; Apple Silicon and Intel." width="100%" /></p>
+<p align="center"><img src="assets/branding/repository-banner.svg" alt="Glim — documents, data and code in one Mac workspace. Free and open source; Apple Silicon and Intel." width="100%" /></p>
 
-# Glim — File viewer for macOS
 
-Glim is a free, open-source, all-purpose file viewer for Mac. Read Markdown, PDFs, images, JSON, CSV and source code in one workspace.
+# Glim — Documents, data, and code. One Mac workspace.
+
+Glim is a free, open-source file viewer for macOS. Open a project folder and read its Markdown, PDFs, images, JSON, CSV and source code in the same window. Switch between previews and source, inspect local data, and make small text edits without leaving your files.
 
 <p align="center">Free and open source · macOS · Apple Silicon &amp; Intel · <b>English</b> / <a href="README.zh-CN.md">简体中文</a></p>
 
@@ -19,60 +20,62 @@ Glim is a free, open-source, all-purpose file viewer for Mac. Read Markdown, PDF
   <a href="https://github.com/glimapp/glim/stargazers"><img src="https://img.shields.io/github/stars/glimapp/glim?style=social" alt="GitHub stars" /></a>
 </p>
 
-## Documents, data and code in one workspace
+## Read a folder, not just a file
 
-<p align="center"><img src="assets/readme/workspace.png" alt="Glim's redesigned macOS workspace showing a file tree, multiple document tabs, centered workspace search, and a rendered Markdown page with an embedded diagram from 12-factor-agents." width="100%" /></p>
+<p align="center"><img src="assets/readme/workspace.png" alt="Glim showing a Markdown report with an embedded GitHub Star chart, a project file tree, and PNG, Markdown and SVG tabs." width="100%" /></p>
 
-The compact interface puts document tabs beside a resizable file sidebar, with workspace search in the title bar. Preview and source controls stay close at hand. The screenshot shows the public [12-factor-agents](https://github.com/humanlayer/12-factor-agents) documentation; its text and illustration belong to that project.
+A Markdown report, its chart images, the scripts that produced them and the underlying database can stay together. The screenshot shows a Markdown report with an embedded chart, with related PNG and SVG files open in adjacent tabs.
 
-[Download Glim](https://github.com/glimapp/glim/releases/latest) · [Vote for the next format](https://github.com/glimapp/glim/discussions/28) · [Request a file format](https://github.com/glimapp/glim/issues/new?template=feature_request.yml)
-
-| Looking for… | What Glim offers |
+| Your task | In Glim |
 | --- | --- |
-| A Markdown viewer | Read documents with Mermaid diagrams, tables and LaTeX formulas; switch to source for small edits |
-| A JSON viewer | Expand nested objects and arrays, then switch back to the original text |
-| A CSV / TSV viewer | Read a table, inspect multiline cell values, or check the source |
-| A PDF, image or Office viewer | Keep read-only previews in workspace tabs; Office layout depends on macOS |
-| An EPUB reader or SQLite viewer | Read books with bookmarks, or browse local database tables in a read-only snapshot |
+| Read a report or project documentation | Render Markdown tables, diagrams and formulas; follow local links and view related images |
+| Inspect an export or API response | Expand JSON objects, read CSV/TSV tables and inspect complete cell values |
+| Check a local database | Browse SQLite tables, filter and sort records, and inspect schema in a read-only snapshot |
+| Review documents and reference material | Keep PDFs, supported Office files, images and ebooks in workspace tabs |
+| Fix a typo or configuration value | Edit UTF-8 text with undo/redo, automatic saving and explicit ⌘S |
 
-## Supported file formats
+### Inspect the data behind the document
+
+<p align="center"><img src="assets/readme/sqlite.png" alt="Glim browsing a read-only SQLite snapshot with a table list, records filtered by drupal, sortable columns and page navigation." width="100%" loading="lazy" /></p>
+
+SQLite opens in a private read-only snapshot. Choose a table or view, search across every column in all records, sort, or double-click a value to read it in full. Glim leaves the source database unchanged.
+
+## Start with your own files
+
+1. **Open a file** with ⌘O, or **open a folder** with ⌘⇧O. The sidebar lets you browse related files; title-bar search finds files by name or path in workspace folders.
+2. **Choose the view that fits the content.** Markdown, HTML and supported data readers provide preview/source controls. Documents and images use their format-specific reading controls.
+3. **Make a small edit when needed.** Existing UTF-8 files save automatically. ⌘N starts an untitled note; its first ⌘S asks where to save it.
+
+[User guide](docs/user-guide.md) · [Formats and compatibility](docs/file-format-support.md) · [Download Glim](https://github.com/glimapp/glim/releases/latest)
+
+## Formats at a glance
 
 <a href="docs/file-format-support.md">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/readme/formats-dark.svg" />
     <source media="(prefers-color-scheme: light)" srcset="assets/readme/formats.svg" />
-    <img src="assets/readme/formats.svg" alt="Representative Glim file formats; dagger marks limited previews" width="100%" />
+    <img src="assets/readme/formats.svg" alt="Representative Glim file formats; dagger marks partial previews" width="100%" />
   </picture>
 </a>
 
-*Selected formats: † limited preview. Capabilities and limits are listed below and in the full format guide.*
+*† Partial preview. See the [format guide](docs/file-format-support.md) for each reader’s actual behavior.*
 
-| Content | What you can do |
+| Content | Representative formats |
 | --- | --- |
-| Documents | Markdown, static HTML, ordinary UTF-8 text, diagrams and formulas |
-| Native documents | Read-only PDF, Word, Excel, PowerPoint, Keynote, Pages, Numbers, and RTF previews |
-| Images | PNG, JPEG, WebP, animated GIF, SVG, multipage TIFF, BMP, ICO, ICNS, EXR / HDR |
-| Media & tools | Audio/video and folder playlists; fonts and font collections; SQLite tables, schema, and associated WAL files |
-| Mind maps | XMind previews with sheet switching, topic folding, zoom and topic details |
-| Code & configuration | Rust, Python, JS/TS, Go, C/C++, Java, Swift, Ruby, INI, and more; syntax highlighting and basic text editing |
-| Data | JSON / JSONC, CSV / TSV, YAML, TOML, SQL, GeoJSON and notebooks; trees, tables or text previews |
-| AI model metadata | safetensors names, shapes, dtypes, and parameter counts, read from the header only |
-| First-pass previews | AsciiDoc / Org / RST, subtitles, TSV / NDJSON / JSON5, D2 / Pikchr / Vega, OBJ / STL, archive listings and selected text previews, and more |
+| Documents and text | Markdown, HTML, UTF-8 text and logs; diagrams and formulas in Markdown |
+| Data and code | JSON/JSONC/JSON5, CSV/TSV, YAML, TOML, XML, SQLite and highlighted source code |
+| Images and documents | PNG, JPEG, WebP, GIF, SVG, TIFF, PDF, Word, Excel, PowerPoint and iWork |
+| Books and mind maps | EPUB, FB2, CBZ and XMind |
+| Media and specialist files | System-supported audio/video, fonts, safetensors metadata, archive listings and selected text previews |
 
-**Platform scope:** Glim is maintained for macOS on Apple Silicon and Intel. Both architectures share the file readers and Git workspace described here.
+### What to expect
 
-<details>
-<summary>Format details and limits</summary>
+- **Editing:** UTF-8 text supports basic editing and saving. Tables, data trees, database snapshots, images and document previews are read-only; editable formats retain source access. Large or long-line text uses editable pages.
+- **Compatibility:** Office previews can differ from the original layout; spreadsheet formulas use saved values without recalculation. Media playback depends on macOS codecs. Some formats provide a partial preview or source fallback.
+- **Local files and network content:** Files open locally. Markdown can fetch remote images, and HTML previews support CSS, JavaScript and network resources. Optional anonymous usage telemetry is controlled in Settings; see [telemetry](docs/telemetry.md).
+- **Platform:** macOS on Apple Silicon and Intel. Current downloads are ad-hoc signed and have not been notarized by Apple; installation steps are below.
 
-Markdown includes Mermaid (flowcharts, subgraphs, Journey, Radar, and ZenUML), Graphviz/DOT, PlantUML (including partial Salt and Chen ER support), flowchart.js, WaveDrom, LaTeX, GFM tables, task lists, footnotes, GitHub Alerts, and frontmatter. Failed diagram blocks retain their source.
-
-Large or very long-line text opens in read-only pages. Reader budgets and their effects are listed in the [shared reader policy](docs/reader-limits.md). HTML preview is static and does not execute scripts. Archives support listings and selected text previews, rather than general extraction or full content rendering. Non-UTF-8 text is not currently decoded.
-
-Office layout and media codecs depend on macOS support. XLS/XLSX previews show local tables and stored formula values; use the default application for complete styles, charts, or complex documents.
-
-</details>
-
-[Documentation](docs/README.md) · [Full format list and limits](docs/file-format-support.md) · [Roadmap](docs/TODO.md)
+[Full format guide](docs/file-format-support.md) · [Documentation](docs/README.md) · [Remaining work](docs/TODO.md)
 
 ## Download
 

@@ -296,27 +296,6 @@ This page is generated from the same policy. After editing it, run `python3 scri
 | --- | ---: | --- | --- | --- |
 | `geo.points` | 10,000 | items | page | Coordinates per table page; previous/next navigation covers all GPX/KML points and Source preserves the complete XML. |
 
-## git
-
-| Key | Value | Unit | Effect | Behavior |
-| --- | ---: | --- | --- | --- |
-| `git.output_bytes` | 8 MiB | bytes | reject | git: output bytes |
-| `git.diff_output_bytes` | 256 MiB | bytes | reject | git: diff output bytes |
-| `git.stderr_bytes` | 64 KiB | bytes | truncate | git: stderr bytes |
-| `git.error_chars` | 16,384 | characters | truncate | git: error chars |
-| `git.history_commits` | 1,000 | items | reject | git: history commits |
-| `git.history_batch` | 200 | items | budget | git: history batch |
-| `git.stashes` | 100 | items | truncate | git: stashes |
-| `git.refs` | 1,000 | items | truncate | Maximum references listed by the repository panel |
-
-## diff
-
-| Key | Value | Unit | Effect | Behavior |
-| --- | ---: | --- | --- | --- |
-| `diff.preview_bytes` | 16 MiB | bytes | truncate | diff: preview bytes |
-| `diff.lines` | 50,000 | items | truncate | diff: lines |
-| `diff.line_bytes` | 64 KiB | bytes | truncate | diff: line bytes |
-
 ## workspace
 
 | Key | Value | Unit | Effect | Behavior |

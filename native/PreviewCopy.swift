@@ -46,15 +46,17 @@ final class PreviewCopy: NSObject {
         return output.joined(separator: "\n")
     }
     @objc private func copyText() {
+        ReaderTelemetry.record(ReaderTelemetry.fileKind(source), 7)
         let copy: (String) -> Void = { [weak self] value in
             guard let self = self, self.root?.window != nil else { return }
+            ReaderTelemetry.record(ReaderTelemetry.fileKind(self.source), 25, value.isEmpty ? 2 : 0)
             if value.isEmpty { self.notice(L("No copyable text was found. Try image text recognition.")); return }
             NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string)
         }
         if let textProvider = textProvider { textProvider(copy) }
         else if let root = root { copy(Self.text(in: root)) }
     }
-    @objc private func recognizeImages() {
+    @objc private func recognizeImages() { ReaderTelemetry.record(ReaderTelemetry.fileKind(source), 8);
         guard let parent = root?.window else { return }
         generation += 1
         recognition.cancel()
@@ -73,7 +75,7 @@ final class PreviewCopy: NSObject {
         images = OfficeImageStream(source: source)
         loadNextImage()
     }
-    @objc private func loadNextImage() {
+    @objc private func loadNextImage() { ReaderTelemetry.record(ReaderTelemetry.fileKind(source), 5);
         guard let parent = root?.window, let images = images else { return }
         let generation = generation
         nextImage.isEnabled = false; recognize.isEnabled = false

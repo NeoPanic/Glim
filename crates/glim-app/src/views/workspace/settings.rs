@@ -189,7 +189,7 @@ impl Workspace {
                                 .child(divider())
                                 .child(row("Keyboard Shortcuts…", "", shortcuts))
                                 .child(divider())
-                                .child(row("Anonymous usage telemetry", "", telemetry)),
+                                .child(row("Anonymous usage telemetry", "Reports feature actions, system/resource metrics and sanitized errors with a random installation ID; excludes document contents and paths.", telemetry)),
                         ),
                 ),
             )

@@ -163,6 +163,7 @@ final class HTMLPreview: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = action.request.url else { decisionHandler(.cancel); return }
         if action.navigationType == .linkActivated || action.targetFrame == nil {
+            ReaderTelemetry.record(7, 28)
             if url.scheme == "glim-html", url.path == document.path, let fragment = URLComponents(url: url, resolvingAgainstBaseURL: false)?.fragment {
                 reveal(fragment); decisionHandler(.cancel); return
             }
@@ -180,12 +181,13 @@ final class HTMLPreview: NSObject, WKNavigationDelegate {
         decisionHandler(action.targetFrame?.isMainFrame == false || url.path == documentURL.path ? .allow : .cancel)
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        loaded = true; loading.isHidden = true
+        ReaderTelemetry.record(7, 26); loaded = true; loading.isHidden = true
         didLoad?()
         if let anchor = anchor { reveal(anchor) }
     }
     private func failed(_ error: Error) {
         guard (error as NSError).code != NSURLErrorCancelled else { return }
+        ReaderTelemetry.record(7, 0, 1)
         loading.stringValue = error.localizedDescription; loading.isHidden = false
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed(error) }

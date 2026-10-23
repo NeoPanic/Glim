@@ -70,6 +70,7 @@ impl BookReader {
         let book = Arc::new(book);
         let initial = book.clone();
         let (cancel, guard) = glim_services::work::Cancellation::task();
+        let telemetry_started = std::time::Instant::now();
         let work = cx.background_executor().spawn(async move {
             let mut state = books::preferences::read(&initial.fingerprint).unwrap_or_default();
             state.chapter = state.chapter.min(initial.chapters.len() - 1);
@@ -79,6 +80,7 @@ impl BookReader {
         let task = cx.spawn(async move |view, cx| {
             let _guard = guard;
             let result = work.await;
+            glim_services::telemetry::result("books_load", None, telemetry_started, &result);
             let _ = view.update(cx, |view, cx| {
                 view.loading = false;
                 match result {
@@ -86,7 +88,10 @@ impl BookReader {
                         view.state = state;
                         view.install(content, cx);
                     }
-                    Err(error) => view.error = Some(format!("{error:#}")),
+                    Err(error) => {
+                        glim_services::telemetry::operation_failed("books_load", None, &error);
+                        view.error = Some(format!("{error:#}"));
+                    }
                 }
                 cx.notify();
             });
@@ -166,18 +171,23 @@ impl BookReader {
         self.save(cx);
         let book = self.book.clone();
         let (cancel, guard) = glim_services::work::Cancellation::task();
+        let telemetry_started = std::time::Instant::now();
         let work = cx
             .background_executor()
             .spawn(async move { books::chapter_cancellable(&book, index, &cancel) });
         self.task = Some(cx.spawn(async move |view, cx| {
             let _guard = guard;
             let result = work.await;
+            glim_services::telemetry::result("books_load", None, telemetry_started, &result);
             let _ = view.update(cx, |view, cx| {
                 view.task = None;
                 view.loading = false;
                 match result {
                     Ok(content) => view.install(content, cx),
-                    Err(error) => view.error = Some(format!("{error:#}")),
+                    Err(error) => {
+                        glim_services::telemetry::operation_failed("books_load", None, &error);
+                        view.error = Some(format!("{error:#}"));
+                    }
                 }
                 cx.notify();
             });
@@ -185,6 +195,7 @@ impl BookReader {
         cx.notify();
     }
     fn follow(&mut self, href: &str, cx: &mut Context<Self>) {
+        glim_services::telemetry::reader_feature("ebook", "follow_link", []);
         if let Ok(url) = url::Url::parse(href)
             && matches!(url.scheme(), "https" | "http" | "mailto")
         {
@@ -237,6 +248,10 @@ impl BookReader {
         }
     }
     fn page(&mut self, next: bool, cx: &mut Context<Self>) {
+        glim_services::telemetry::track(
+            "ebook_page",
+            [("forward", glim_services::telemetry::flag(next))],
+        );
         if self.loading {
             return;
         }
@@ -261,6 +276,10 @@ impl BookReader {
         }
     }
     fn chapter(&mut self, next: bool, cx: &mut Context<Self>) {
+        glim_services::telemetry::track(
+            "ebook_chapter",
+            [("forward", glim_services::telemetry::flag(next))],
+        );
         let index = if next {
             self.state.chapter + 1
         } else {
@@ -304,6 +323,7 @@ impl BookReader {
         }));
     }
     fn bookmark(&mut self, cx: &mut Context<Self>) {
+        glim_services::telemetry::track("ebook_bookmark", []);
         if let Some(index) = self.state.bookmarks.iter().position(|b| {
             b.chapter == self.state.chapter && (b.fraction - self.state.fraction).abs() < 0.02
         }) {
@@ -468,6 +488,11 @@ impl Render for BookReader {
                             .selected(self.contents)
                             .label(tr("Contents"))
                             .on_click(cx.listener(|v, _, _, cx| {
+                                glim_services::telemetry::reader_feature(
+                                    "ebook",
+                                    "toggle_contents",
+                                    [],
+                                );
                                 v.contents = !v.contents;
                                 v.bookmarks = false;
                                 cx.notify();
@@ -479,6 +504,11 @@ impl Render for BookReader {
                             .label("A−")
                             .disabled(font <= 14.)
                             .on_click(cx.listener(|v, _, _, cx| {
+                                glim_services::telemetry::reader_feature(
+                                    "ebook",
+                                    "font_smaller",
+                                    [],
+                                );
                                 v.state.font_size = (v.state.font_size - 2.).max(14.);
                                 v.save(cx);
                                 cx.notify();
@@ -491,6 +521,11 @@ impl Render for BookReader {
                             .label("A+")
                             .disabled(font >= 32.)
                             .on_click(cx.listener(|v, _, _, cx| {
+                                glim_services::telemetry::reader_feature(
+                                    "ebook",
+                                    "font_larger",
+                                    [],
+                                );
                                 v.state.font_size = (v.state.font_size + 2.).min(32.);
                                 v.save(cx);
                                 cx.notify();
@@ -505,6 +540,11 @@ impl Render for BookReader {
                                 "Sans serif"
                             }))
                             .on_click(cx.listener(|v, _, _, cx| {
+                                glim_services::telemetry::reader_feature(
+                                    "ebook",
+                                    "font_family",
+                                    [],
+                                );
                                 v.state.serif = !v.state.serif;
                                 v.save(cx);
                                 cx.notify();
@@ -515,6 +555,11 @@ impl Render for BookReader {
                             .small()
                             .label(format!("{} {:.1}", tr("Spacing"), self.state.line_height))
                             .on_click(cx.listener(|v, _, _, cx| {
+                                glim_services::telemetry::reader_feature(
+                                    "ebook",
+                                    "line_spacing",
+                                    [],
+                                );
                                 v.state.line_height = if v.state.line_height < 1.6 {
                                     1.7
                                 } else if v.state.line_height < 1.9 {
@@ -531,6 +576,7 @@ impl Render for BookReader {
                             .small()
                             .label(tr("Page width"))
                             .on_click(cx.listener(|v, _, _, cx| {
+                                glim_services::telemetry::reader_feature("ebook", "page_width", []);
                                 v.state.page_width = if v.state.page_width < 650. {
                                     720.
                                 } else if v.state.page_width < 800. {
@@ -548,6 +594,11 @@ impl Render for BookReader {
                             .selected(self.state.paper)
                             .label(tr("Paper"))
                             .on_click(cx.listener(|v, _, _, cx| {
+                                glim_services::telemetry::reader_feature(
+                                    "ebook",
+                                    "paper_style",
+                                    [],
+                                );
                                 v.state.paper = !v.state.paper;
                                 v.save(cx);
                                 cx.notify();

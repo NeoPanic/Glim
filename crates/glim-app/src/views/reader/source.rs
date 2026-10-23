@@ -1,9 +1,8 @@
 use super::super::minimap::Minimap;
-use glim_core::DiffSpan;
 use gpui_kit::{
     component::{
         ActiveTheme, WindowExt,
-        input::{Editor, EditorState, InputEvent, TextDecoration, TextDecorationCollection},
+        input::{Editor, EditorState, InputEvent},
     },
     *,
 };
@@ -12,14 +11,11 @@ use std::{
     rc::Rc,
 };
 
-/// Shared basic editor surface for text/code; inline diffs remain read-only.
+/// Shared basic editor surface for text/code and read-only value dialogs.
 /// Native gutter, folding and scrollbars share the editor's layout frame.
 pub(super) struct SourceReader {
     pub state: Entity<EditorState>,
     pub minimap: Entity<Minimap>,
-    spans: Vec<DiffSpan>,
-    marks: Option<TextDecorationCollection>,
-    palette: Option<(Hsla, Hsla)>,
     readonly: bool,
     locked: bool,
     baseline: Rc<RefCell<String>>,
@@ -30,8 +26,7 @@ impl SourceReader {
     pub fn new(
         text: &str,
         language: &'static str,
-        diff: bool,
-        spans: Vec<DiffSpan>,
+        readonly: bool,
         scroll: ScrollHandle,
         window: &mut Window,
         cx: &mut App,
@@ -41,8 +36,8 @@ impl SourceReader {
                 .language(language)
                 .auto_close(false)
                 .smart_indent(false)
-                .line_number(!diff)
-                .folding(!diff)
+                .line_number(!readonly)
+                .folding(!readonly)
                 .soft_wrap(false)
                 .scroll_beyond_last_line(Some(0));
             if super::lexical::supports(language) {
@@ -52,13 +47,11 @@ impl SourceReader {
                 );
             }
             state.set_value(text.to_owned(), window, cx);
-            state.set_readonly(diff, cx);
+            state.set_readonly(readonly, cx);
             state
         });
-        let minimap = cx.new(|cx| Minimap::new(state.clone(), text, diff, scroll, cx));
-        let marks =
-            diff.then(|| state.update(cx, |s, cx| s.create_decorations_collection(Vec::new(), cx)));
-        let baseline = Rc::new(RefCell::new(if diff {
+        let minimap = cx.new(|cx| Minimap::new(state.clone(), text, scroll, cx));
+        let baseline = Rc::new(RefCell::new(if readonly {
             String::new()
         } else {
             text.to_owned()
@@ -72,23 +65,20 @@ impl SourceReader {
                 let text = state.read(cx).value().to_string();
                 let dirty = text != *saved.borrow();
                 let previous = changed.replace(dirty);
-                map.update(cx, |map, cx| map.set_text(&text, diff, cx));
+                map.update(cx, |map, cx| map.set_text(&text, cx));
                 if previous != dirty {
                     cx.refresh_windows();
                 }
             }
         });
         Self {
-            readonly: diff,
+            readonly,
             locked: false,
             baseline,
             dirty,
             _edit_subscription: subscription,
             state,
             minimap,
-            spans: compact_spans(text, spans),
-            marks,
-            palette: None,
         }
     }
     pub fn set_locked(&mut self, locked: bool, cx: &mut App) {
@@ -119,29 +109,6 @@ impl SourceReader {
         let menu_copyable = capabilities.is_copyable();
         self.minimap
             .update(cx, |map, cx| map.set_preview(false, cx));
-        let palette = (cx.theme().green, cx.theme().red);
-        if self.palette != Some(palette)
-            && let Some(marks) = &self.marks
-        {
-            marks.set(
-                self.spans
-                    .iter()
-                    .map(|s| {
-                        let color = if s.addition { palette.0 } else { palette.1 };
-                        TextDecoration::new(
-                            s.range.clone(),
-                            HighlightStyle {
-                                color: Some(color),
-                                background_color: Some(color.opacity(0.10)),
-                                ..Default::default()
-                            },
-                        )
-                    })
-                    .collect(),
-                cx,
-            );
-            self.palette = Some(palette);
-        }
         gpui_kit::component::h_flex()
             .size_full()
             .font_family("Menlo")
@@ -189,71 +156,6 @@ impl SourceReader {
     }
 }
 
-// The toolkit scans the decoration collection for each visible range. A block
-// of thousands of adjacent changes needs one range, not one per source line.
-fn compact_spans(text: &str, spans: Vec<DiffSpan>) -> Vec<DiffSpan> {
-    let mut compact: Vec<DiffSpan> = Vec::new();
-    for span in spans {
-        if let Some(previous) = compact.last_mut()
-            && previous.addition == span.addition
-            && text.get(previous.range.end..span.range.start) == Some("\n")
-        {
-            previous.range.end = span.range.end;
-        } else {
-            compact.push(span);
-        }
-    }
-    compact
-}
-#[cfg(test)]
-mod tests {
-    use super::compact_spans;
-    #[test]
-    fn compaction_keeps_colors_and_hunk_boundaries() {
-        let (text, spans) = glim_core::diff_content(
-            "@@ -1,2 +1,2 @@\n-旧一\n-旧二\n+新一\n+新二\n@@ -10 +10 @@\n+另一区块\n",
-        );
-        let compact = compact_spans(&text, spans);
-        assert_eq!(
-            compact
-                .iter()
-                .map(|s| (&text[s.range.clone()], s.addition))
-                .collect::<Vec<_>>(),
-            [
-                ("-旧一\n-旧二", false),
-                ("+新一\n+新二", true),
-                ("+另一区块", true)
-            ]
-        );
-    }
-}
-
-#[cfg(test)]
-mod format_registry_tests {
-    #[test]
-    fn new_source_formats_have_compiled_grammars() {
-        crate::app::languages::init();
-        let registry = gpui_kit::component::highlighter::LanguageRegistry::singleton();
-        for name in [
-            "java", "sql", "make", "html", "c", "cpp", "python", "json", "ruby", "php", "csharp",
-            "swift", "kotlin", "lua", "scala", "elixir", "zig", "graphql", "proto", "cmake",
-            "astro", "svelte", "erb", "ejs", "jsdoc",
-        ] {
-            let grammar = registry
-                .language(name)
-                .expect("enabled grammar must be registered");
-            assert!(grammar.language.is_some(), "{name}");
-            assert!(!grammar.highlights.is_empty(), "{name}");
-            let highlighter = gpui_kit::component::highlighter::SyntaxHighlighter::new(name);
-            assert_eq!(
-                highlighter.language().as_ref(),
-                name,
-                "invalid query for {name}"
-            );
-        }
-    }
-}
-
 struct TextDialog {
     source: Option<SourceReader>,
     page: Option<Entity<super::paged::PagedReader>>,
@@ -268,7 +170,6 @@ impl TextDialog {
                     &text,
                     "plain",
                     true,
-                    Vec::new(),
                     ScrollHandle::new(),
                     window,
                     cx,
@@ -326,4 +227,30 @@ pub(super) fn show_text_dialog(title: String, text: String, window: &mut Window,
             .width(px(640.))
             .child(div().h(px(360.)).child(content.clone()))
     });
+}
+
+#[cfg(test)]
+mod format_registry_tests {
+    #[test]
+    fn new_source_formats_have_compiled_grammars() {
+        crate::app::languages::init();
+        let registry = gpui_kit::component::highlighter::LanguageRegistry::singleton();
+        for name in [
+            "java", "sql", "make", "html", "c", "cpp", "python", "json", "ruby", "php", "csharp",
+            "swift", "kotlin", "lua", "scala", "elixir", "zig", "graphql", "proto", "cmake",
+            "astro", "svelte", "erb", "ejs", "jsdoc",
+        ] {
+            let grammar = registry
+                .language(name)
+                .expect("enabled grammar must be registered");
+            assert!(grammar.language.is_some(), "{name}");
+            assert!(!grammar.highlights.is_empty(), "{name}");
+            let highlighter = gpui_kit::component::highlighter::SyntaxHighlighter::new(name);
+            assert_eq!(
+                highlighter.language().as_ref(),
+                name,
+                "invalid query for {name}"
+            );
+        }
+    }
 }

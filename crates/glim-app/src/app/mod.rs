@@ -6,6 +6,7 @@ mod image_http;
 pub(crate) mod languages;
 pub(crate) mod media_prepare;
 mod menus;
+pub(crate) mod recovery;
 mod shortcuts;
 pub(crate) mod spreadsheet_prepare;
 pub(crate) mod telemetry;
@@ -20,8 +21,8 @@ use crate::views::workspace::Workspace;
 use actions::{
     About, AddFolder, CheckForUpdates, CloseWindow, CloseWorkspace, DefaultApplications,
     KeyboardShortcuts, LanguageChinese, LanguageEnglish, LanguageSystem, NavigateBack,
-    NavigateForward, NewWindow, NextTab, OpenFile, OpenFolder, OpenSettings, PreviousTab, Quit,
-    Refresh, SaveFile, SearchWorkspace, ToggleDarkMode, TogglePreview, ToggleSidebar,
+    NavigateForward, NewFile, NewWindow, NextTab, OpenFile, OpenFolder, OpenSettings, PreviousTab,
+    Quit, Refresh, SaveFile, SearchWorkspace, ToggleDarkMode, TogglePreview, ToggleSidebar,
     ToggleWordWrap,
 };
 
@@ -30,7 +31,6 @@ pub struct ReaderPreferences {
     pub html_preview: bool,
     pub markdown_preview: bool,
     pub csv_preview: bool,
-    pub diff_side_by_side: Option<bool>,
     pub preview_save_task: Option<Task<()>>,
 }
 impl Global for ReaderPreferences {}
@@ -202,6 +202,17 @@ pub(crate) fn set_appearance(appearance: glim_services::preferences::Appearance,
     if updates::busy(cx) {
         return;
     }
+    glim_services::telemetry::track(
+        "theme_changed",
+        [(
+            "appearance",
+            glim_services::telemetry::text(match appearance {
+                glim_services::preferences::Appearance::System => "system",
+                glim_services::preferences::Appearance::Light => "light",
+                glim_services::preferences::Appearance::Dark => "dark",
+            }),
+        )],
+    );
     cx.global_mut::<AppearancePreference>().0 = appearance;
     apply_appearance(appearance, cx);
     let previous = cx.global_mut::<AppearanceSaveTask>().0.take();
@@ -324,7 +335,7 @@ pub fn run() -> Result<()> {
     }
     if path.as_deref() == Some(std::ffi::OsStr::new("--help")) {
         println!(
-            "Usage: glim [file-or-folder]\n\nOpen a folder, Git repository, or UTF-8 file in the viewer and basic text editor."
+            "Usage: glim [file-or-folder]\n\nOpen a folder or UTF-8 file in the viewer and basic text editor."
         );
         return Ok(());
     }
@@ -336,7 +347,6 @@ pub fn run() -> Result<()> {
     let html_preview = glim_services::preferences::preview_mode("html");
     let markdown_preview = glim_services::preferences::preview_mode("markdown");
     let csv_preview = glim_services::preferences::preview_mode("csv");
-    let diff_side_by_side = glim_services::preferences::diff_side_by_side();
     let application = gpui_kit::application().with_assets(assets::Assets);
     let image_client = image_http::ImageHttpClient::new(application.background_executor());
     let application = application.with_http_client(std::sync::Arc::new(image_client));
@@ -376,10 +386,19 @@ pub fn run() -> Result<()> {
         cx.on_app_quit(|cx| {
             log::info!("application quit requested");
             log::logger().flush();
+            for (view, _) in OpenWorkspaces::windows(cx) {
+                let _ = view.update(cx, |view, _| view.flush_usage());
+            }
             let telemetry = telemetry::shutdown(cx);
+            let recovery = recovery::shutdown(cx);
             let pending = cx.global_mut::<ExplorerSaveTask>().0.take();
             let workspace = cx.global_mut::<WorkspaceSaveTask>().0.take();
             async move {
+                if let Some(recovery) = recovery
+                    && let Err(error) = recovery.await
+                {
+                    log::error!("draft recovery shutdown: {error:#}");
+                }
                 if let Some(telemetry) = telemetry {
                     telemetry.await;
                 }
@@ -400,10 +419,11 @@ pub fn run() -> Result<()> {
             html_preview,
             markdown_preview,
             csv_preview,
-            diff_side_by_side,
             preview_save_task: None,
         });
         cx.set_global(OpenWorkspaces::default());
+        cx.set_global(QuitSession::default());
+        recovery::init(cx);
         cx.set_global(DefaultApplicationsTask::default());
         updates::init(cx);
         *context.borrow_mut() = Some(cx.to_async());
@@ -412,6 +432,7 @@ pub fn run() -> Result<()> {
             cx,
         );
         crate::views::explorer::Explorer::init(cx);
+        telemetry::observe_commands(cx);
         cx.bind_keys([
             KeyBinding::new("space", actions::BookNextPage, Some("Ebook")),
             KeyBinding::new("shift-space", actions::BookPreviousPage, Some("Ebook")),
@@ -440,6 +461,7 @@ pub fn run() -> Result<()> {
             KeyBinding::new("secondary-q", Quit, None),
             KeyBinding::new("secondary-,", OpenSettings, None),
             KeyBinding::new("secondary-shift-n", NewWindow, None),
+            KeyBinding::new("secondary-n", NewFile, None),
             KeyBinding::new("secondary-o", OpenFile, None),
             KeyBinding::new("secondary-s", SaveFile, None),
             KeyBinding::new("secondary-shift-o", OpenFolder, None),
@@ -569,7 +591,10 @@ fn open_workspace_with_session(
         windows.push((workspace.downgrade(), window.window_handle()));
         workspace
     }) {
-        Ok(_) => cx.activate(true),
+        Ok(_) => {
+            glim_services::telemetry::track("window_opened", []);
+            cx.activate(true);
+        }
         Err(error) => log::error!("Cannot open Glim window: {error:#}"),
     }
 }
@@ -585,44 +610,163 @@ impl OpenWorkspaces {
     }
 }
 
+pub(crate) fn open_document_paths(cx: &App) -> Vec<std::path::PathBuf> {
+    OpenWorkspaces::windows(cx)
+        .into_iter()
+        .filter_map(|(view, _)| view.upgrade())
+        .flat_map(|view| view.read(cx).open_document_paths())
+        .collect()
+}
+
 pub(crate) fn any_other_saving(exclude: EntityId, cx: &App) -> bool {
     cx.global::<OpenWorkspaces>().0.iter().any(|(v, _)| {
         v.upgrade()
             .is_some_and(|v| v.entity_id() != exclude && v.read(cx).is_saving())
     })
 }
-fn request_quit(cx: &mut App) {
+#[derive(Default)]
+struct QuitSession(bool);
+impl Global for QuitSession {}
+
+#[cfg(test)]
+mod quit_tests {
+    use super::{NewFile, OpenWorkspaces, QuitSession, Workspace, request_quit};
+    use gpui_kit::{
+        AppContext, Bounds, KeyBinding, TestAppContext, WindowBounds, WindowOptions, px, size,
+        test::TestWindowExt,
+    };
+
+    #[gpui_kit::test]
+    fn canceling_quit_in_another_window_keeps_previously_approved_drafts(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(OpenWorkspaces::default());
+            cx.set_global(QuitSession::default());
+            cx.bind_keys([KeyBinding::new("secondary-n", NewFile, None)]);
+        });
+        let mut views = Vec::new();
+        for text in ["first unsaved note", "second unsaved note"] {
+            let (handle, view) = cx.update(|cx| {
+                let (handle, view) = gpui_kit::open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                            None,
+                            size(px(1000.), px(700.)),
+                            cx,
+                        ))),
+                        ..Default::default()
+                    },
+                    cx,
+                    |window, cx| cx.new(|cx| Workspace::new(None, window, cx)),
+                )
+                .unwrap();
+                cx.global_mut::<OpenWorkspaces>()
+                    .0
+                    .push((view.downgrade(), handle));
+                (handle, view)
+            });
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                window.press("secondary-n", cx);
+                window.render_frame(cx);
+                window.input(text, cx);
+            })
+            .unwrap();
+            cx.run_until_parked();
+            assert!(cx.update(|cx| view.read(cx).has_unsaved()));
+            views.push(view);
+        }
+        cx.update(request_quit);
+        cx.run_until_parked();
+        cx.simulate_prompt_answer("Don't Save");
+        cx.run_until_parked();
+        cx.simulate_prompt_answer("Cancel");
+        cx.run_until_parked();
+        cx.update(|cx| {
+            assert!(!cx.global::<QuitSession>().0);
+            assert!(views.iter().all(|view| view.read(cx).has_unsaved()));
+        });
+    }
+}
+
+pub(crate) fn request_quit(cx: &mut App) {
     if updates::busy(cx) || updates::prepare_quit(cx) {
         return;
     }
-    let windows = cx.global::<OpenWorkspaces>().0.clone();
+    if cx.global::<QuitSession>().0 {
+        return;
+    }
+    if OpenWorkspaces::windows(cx).iter().any(|(view, _)| {
+        view.upgrade()
+            .is_some_and(|view| !view.read(cx).can_begin_quit())
+    }) {
+        return;
+    }
+    cancel_quit(cx);
+    cx.global_mut::<QuitSession>().0 = true;
+    continue_quit(cx);
+}
+pub(crate) fn cancel_quit(cx: &mut App) {
+    cx.global_mut::<QuitSession>().0 = false;
+    for (view, _) in OpenWorkspaces::windows(cx) {
+        if let Some(view) = view.upgrade() {
+            view.update(cx, |view, _| view.reset_quit_approval());
+        }
+    }
+}
+pub(crate) fn continue_quit(cx: &mut App) {
+    if !cx.global::<QuitSession>().0 {
+        return;
+    }
+    if updates::busy(cx) {
+        cancel_quit(cx);
+        return;
+    }
+    let windows = OpenWorkspaces::windows(cx);
     let target = windows
         .iter()
-        .find(|(v, _)| v.upgrade().is_some_and(|v| v.read(cx).is_saving()))
+        .find(|(view, _)| view.upgrade().is_some_and(|view| view.read(cx).is_saving()))
         .or_else(|| {
-            windows
-                .iter()
-                .find(|(v, _)| v.upgrade().is_some_and(|v| v.read(cx).has_unsaved()))
+            windows.iter().find(|(view, _)| {
+                view.upgrade().is_some_and(|view| {
+                    let view = view.read(cx);
+                    view.has_unsaved() && !view.quit_is_approved()
+                })
+            })
         });
     if let Some((view, handle)) = target {
-        let _ = handle.update(cx, |_, window, cx| {
-            let _ = view.update(cx, |v, cx| v.request_quit(window, cx));
-        });
+        if handle
+            .update(cx, |_, window, cx| {
+                let _ = view.update(cx, |view, cx| view.request_quit(window, cx));
+            })
+            .is_err()
+        {
+            cancel_quit(cx);
+        }
     } else {
+        // No drafts are removed until every participating window has approved.
+        for (view, _) in windows {
+            if let Some(view) = view.upgrade() {
+                view.update(cx, |view, cx| view.commit_quit(cx));
+            }
+        }
         cx.quit();
     }
 }
 
 #[derive(Default)]
-struct GitEditorLock(bool);
-impl Global for GitEditorLock {}
-pub(crate) fn git_editors_locked(cx: &App) -> bool {
-    updates::busy(cx) || cx.try_global::<GitEditorLock>().is_some_and(|lock| lock.0)
+struct WorkspaceEditorLock(bool);
+impl Global for WorkspaceEditorLock {}
+pub(crate) fn workspace_editors_locked(cx: &App) -> bool {
+    updates::busy(cx)
+        || cx
+            .try_global::<WorkspaceEditorLock>()
+            .is_some_and(|lock| lock.0)
 }
-pub(crate) fn lock_git_editors(exclude: EntityId, cx: &mut App) -> Result<()> {
+pub(crate) fn lock_workspace_editors(exclude: EntityId, cx: &mut App) -> Result<()> {
     anyhow::ensure!(
-        !git_editors_locked(cx),
-        "Another Git operation is updating the working tree"
+        !workspace_editors_locked(cx),
+        "Another file operation is in progress"
     );
     let windows = cx
         .try_global::<OpenWorkspaces>()
@@ -634,19 +778,19 @@ pub(crate) fn lock_git_editors(exclude: EntityId, cx: &mut App) -> Result<()> {
         .filter(|v| v.entity_id() != exclude)
         .collect::<Vec<_>>();
     anyhow::ensure!(
-        others.iter().all(|v| !v.read(cx).has_unsaved()
-            && !v.read(cx).is_saving()
-            && !v.read(cx).has_running_git(cx)),
-        "Another window has unsaved changes or an active operation. Save drafts and wait before updating the working tree."
+        others
+            .iter()
+            .all(|v| !v.read(cx).has_unsaved() && !v.read(cx).is_saving()),
+        "Another window has unsaved changes or an active operation. Save drafts and wait before changing files."
     );
-    cx.set_global(GitEditorLock(true));
+    cx.set_global(WorkspaceEditorLock(true));
     for view in others {
-        view.update(cx, |v, cx| v.set_git_editing_locked(true, cx));
+        view.update(cx, |v, cx| v.set_editing_locked(true, cx));
     }
     Ok(())
 }
-pub(crate) fn unlock_git_editors(exclude: EntityId, cx: &mut App) {
-    cx.set_global(GitEditorLock(false));
+pub(crate) fn unlock_workspace_editors(exclude: EntityId, cx: &mut App) {
+    cx.set_global(WorkspaceEditorLock(false));
     let windows = cx
         .try_global::<OpenWorkspaces>()
         .map(|w| w.0.clone())
@@ -656,7 +800,7 @@ pub(crate) fn unlock_git_editors(exclude: EntityId, cx: &mut App) {
             && view.entity_id() != exclude
         {
             let _ = handle.update(cx, |_, window, cx| {
-                view.update(cx, |v, cx| v.unlock_git_and_refresh(window, cx));
+                view.update(cx, |v, cx| v.unlock_and_refresh(window, cx));
             });
         }
     }
@@ -672,6 +816,10 @@ pub(crate) fn change_language(language: &'static str, cx: &mut App) {
     if updates::busy(cx) {
         return;
     }
+    glim_services::telemetry::track(
+        "language_changed",
+        [("language", glim_services::telemetry::text(language))],
+    );
     cx.global_mut::<LanguagePreference>().0 = language.to_owned();
     glim_services::locale::set(language);
     gpui_kit::component::set_locale(glim_services::locale::code());

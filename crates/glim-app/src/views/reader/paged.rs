@@ -32,7 +32,6 @@ impl PagedReader {
                 &page.text,
                 "plain",
                 false,
-                Vec::new(),
                 ScrollHandle::new(),
                 window,
                 cx,
@@ -114,6 +113,7 @@ impl PagedReader {
         cx.notify();
     }
     fn toggle_raw(&mut self, cx: &mut Context<Self>) {
+        glim_services::telemetry::track("paged_mode_changed", []);
         if self.task.is_some() {
             return;
         }
@@ -125,6 +125,7 @@ impl PagedReader {
         } else {
             report
         };
+        let telemetry_started = std::time::Instant::now();
         let work = cx.background_executor().spawn(async move {
             let page = source.read(0, false)?;
             let rows = rows(&page.text);
@@ -133,6 +134,7 @@ impl PagedReader {
         });
         self.task = Some(cx.spawn(async move |view, cx| {
             let result = work.await;
+            glim_services::telemetry::result("paged_load", None, telemetry_started, &result);
             let _ = view.update(cx, |view, cx| {
                 view.task = None;
                 match result {
@@ -144,7 +146,10 @@ impl PagedReader {
                         view.error = None;
                         view.scroll = UniformListScrollHandle::new();
                     }
-                    Err(error) => view.error = Some(format!("{error:#}")),
+                    Err(error) => {
+                        glim_services::telemetry::operation_failed("paged_load", None, &error);
+                        view.error = Some(format!("{error:#}"));
+                    }
                 }
                 cx.notify();
             });
@@ -159,6 +164,20 @@ impl PagedReader {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        glim_services::telemetry::reader_feature(
+            "paged",
+            if all {
+                "expand_page"
+            } else if back {
+                "previous_page"
+            } else {
+                "next_page"
+            },
+            [(
+                "binary",
+                glim_services::telemetry::flag(self.page.source.binary),
+            )],
+        );
         if self.task.is_some() || self.saving.get() {
             return;
         }
@@ -175,6 +194,7 @@ impl PagedReader {
         }
         let source = self.page.source.clone();
         let stamp = (self.page.total, self.page.modified, self.page.identity);
+        let telemetry_started = std::time::Instant::now();
         let (cancel, guard) = glim_services::work::Cancellation::task();
         self.task = Some(cx.spawn_in(window, async move |view, cx| {
             let _guard = guard;
@@ -192,6 +212,7 @@ impl PagedReader {
                     Ok::<_, anyhow::Error>((page, rows, widest))
                 })
                 .await;
+            glim_services::telemetry::result("paged_load", None, telemetry_started, &result);
             let _ = view.update_in(cx, |v, window, cx| {
                 v.task = None;
                 match result {
@@ -213,7 +234,10 @@ impl PagedReader {
                         v.error = None;
                         v.scroll = UniformListScrollHandle::new();
                     }
-                    Err(e) => v.error = Some(format!("{e:#}")),
+                    Err(e) => {
+                        glim_services::telemetry::operation_failed("paged_load", None, &e);
+                        v.error = Some(format!("{e:#}"));
+                    }
                 }
                 cx.notify();
             });
@@ -326,6 +350,11 @@ impl Render for PagedReader {
                                 .label(glim_services::locale::tr("Copy page"))
                                 .disabled(busy)
                                 .on_click(cx.listener(|view, _, _, cx| {
+                                    glim_services::telemetry::reader_feature(
+                                        "paged",
+                                        "copy_page",
+                                        [],
+                                    );
                                     cx.write_to_clipboard(ClipboardItem::new_string(
                                         view.page.text.clone(),
                                     ));

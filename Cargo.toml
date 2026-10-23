@@ -4,7 +4,7 @@ default-members = ["crates/glim-app"]
 resolver = "3"
 
 [workspace.package]
-version = "0.2.10"
+version = "0.2.11"
 edition = "2024"
 publish = false
 license = "MIT"
@@ -18,7 +18,7 @@ gpui-kit = { version = "=0.7.1", features = [
     "tree-sitter-tsx", "tree-sitter-toml", "tree-sitter-python", "tree-sitter-go",
     "tree-sitter-c", "tree-sitter-cpp", "tree-sitter-css", "tree-sitter-html",
     "tree-sitter-yaml", "tree-sitter-bash", "tree-sitter-swift",
-    "tree-sitter-markdown", "tree-sitter-markdown-inline", "tree-sitter-diff",
+    "tree-sitter-markdown", "tree-sitter-markdown-inline",
     "tree-sitter-java", "tree-sitter-sql", "tree-sitter-make",
     "tree-sitter-ruby", "tree-sitter-php", "tree-sitter-csharp", "tree-sitter-kotlin",
     "tree-sitter-lua", "tree-sitter-scala", "tree-sitter-elixir", "tree-sitter-zig",
@@ -44,6 +44,7 @@ lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
 
-# Keep GPUI pinned; local patch adds opt-in frame panic recovery and visible-only list measurement.
+# Keep GPUI pinned; local patches add frame recovery, visible-only measurement and opt-in task checkbox callbacks.
 [patch.crates-io]
 gpui-pre = { path = "vendor/gpui-pre" }
+gpui-base = { path = "vendor/gpui-base" }

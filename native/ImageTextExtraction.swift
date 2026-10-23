@@ -53,6 +53,7 @@ final class ImageTextExtraction: NSObject, NSWindowDelegate {
         parent.addChildWindow(panel, ordered: .above)
         panel.setFrameOrigin(NSPoint(x: parent.frame.midX - panel.frame.width / 2, y: parent.frame.midY - panel.frame.height / 2))
         panel.makeKeyAndOrderFront(nil)
+        let telemetryStarted = ProcessInfo.processInfo.systemUptime
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
@@ -73,6 +74,7 @@ final class ImageTextExtraction: NSObject, NSWindowDelegate {
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self, self.generation == generation, self.panel != nil else { return }
                     self.request = nil; self.work = nil
+                    ReaderTelemetry.record(0, 24, value: UInt64(request.results?.count ?? 0), secondary: UInt64(max(0, ProcessInfo.processInfo.systemUptime - telemetryStarted) * 1000))
                     self.text.string = result
                     self.message.stringValue = result.isEmpty ? L("No text found") : L("Select text to copy, or copy all")
                     self.copyButton.isEnabled = !result.isEmpty
@@ -81,6 +83,7 @@ final class ImageTextExtraction: NSObject, NSWindowDelegate {
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self, self.generation == generation, self.panel != nil else { return }
                     self.request = nil; self.work = nil
+                    ReaderTelemetry.record(0, 24, 1, secondary: UInt64(max(0, ProcessInfo.processInfo.systemUptime - telemetryStarted) * 1000))
                     self.message.stringValue = L("Text recognition failed")
                     self.text.string = error.localizedDescription
                 }
@@ -89,7 +92,7 @@ final class ImageTextExtraction: NSObject, NSWindowDelegate {
         self.work = work
         Self.queue.async(execute: work)
     }
-    @objc private func copyAll() {
+    @objc private func copyAll() { ReaderTelemetry.record(0, 7);
         guard !text.string.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text.string, forType: .string)

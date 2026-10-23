@@ -151,7 +151,6 @@ pub fn language_for_path(path: &Path) -> &'static str {
         // C-like syntax only; these retain shader-specific tokens as plain text.
         "glsl" | "vert" | "frag" | "geom" | "osl" => "c",
         "md" | "markdown" => "markdown",
-        "diff" | "patch" => "diff",
         _ => "plain",
     }
 }

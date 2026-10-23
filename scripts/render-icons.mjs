@@ -20,6 +20,23 @@ const dockSource = source
   .replace('</svg>', '</g></svg>');
 const directory = await mkdtemp(join(tmpdir(), 'glim-icons-'));
 try {
+  // Keep the whole rounded tile. GPUI samples straight-alpha PNGs linearly,
+  // so transparent black RGB would bleed into a dark seam when scaling.
+  const welcomeSource = source.replace(/\s*<rect[^>]*stroke="#C7D4D9"[^>]*\/>/, '');
+  if (welcomeSource === source) throw new Error('Welcome icon outline adapter needs review');
+  const surfaceSource = welcomeSource.replace(/<rect[^>]*fill="url\(#surface\)"[^>]*\/>/,
+    '<rect width="1024" height="1024" fill="url(#surface)"/>');
+  if (surfaceSource === welcomeSource) throw new Error('Welcome icon surface adapter needs review');
+  const { data: welcomePixels, info } = await sharp(Buffer.from(welcomeSource))
+    .resize(168, 168).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const surfacePixels = await sharp(Buffer.from(surfaceSource))
+    .resize(168, 168).ensureAlpha().raw().toBuffer();
+  for (let offset = 0; offset < welcomePixels.length; offset += 4) {
+    if (welcomePixels[offset + 3] === 255) continue;
+    surfacePixels.copy(welcomePixels, offset, offset, offset + 3);
+  }
+  await sharp(welcomePixels, { raw: info }).png()
+    .toFile(fileURLToPath(new URL('../assets/branding/glim-welcome.png', import.meta.url)));
   await sharp(Buffer.from(source)).resize(1024, 1024).png().toFile(fileURLToPath(new URL('../assets/branding/glim.png', import.meta.url)));
   const iconset = join(directory, 'Glim.iconset');
   await mkdir(iconset);

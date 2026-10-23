@@ -1,14 +1,12 @@
 use super::Workspace;
 use crate::views::{
-    changes::{ChangeSelected, Changes},
     explorer::{Explorer, ExplorerEvent},
     reader::Reader,
 };
-use glim_core::{DiffDocument, Document, GitChange};
+use glim_core::Document;
 use glim_services::limits as reader_limits;
 use glim_services::{
     files::read_document,
-    git::read_diff,
     workspace::{FolderSnapshot, open_folder},
 };
 use gpui_kit::*;
@@ -21,14 +19,12 @@ enum Opened {
 pub(super) enum Content {
     File(Document),
     Page(glim_services::paged::TextPage),
-    Commit(glim_services::binary::BytePreview, Option<PathBuf>),
     Image(glim_services::media::ImageDocument),
     XMind(glim_services::xmind::MindMap),
     Opml(glim_services::opml::Document),
     Book(glim_services::books::Book),
     Native(PathBuf, bool, bool),
     Sqlite(PathBuf),
-    Diff(DiffDocument, PathBuf),
     Unavailable(PathBuf, String),
 }
 impl Workspace {
@@ -98,10 +94,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let index = self
-            .tabs
-            .iter()
-            .position(|r| r.path == path && !r.historical && r.diff.is_none());
+        let index = self.tabs.iter().position(|r| r.path == path);
         if let Some(index) = index {
             self.activate_tab(index, window, cx);
             self.tabs[index].reveal_native(cx);
@@ -139,10 +132,15 @@ impl Workspace {
         };
         let (cancel, cancel_on_drop) = glim_services::work::Cancellation::task();
         let work = cx.background_executor().spawn(async move {
+            let started = std::time::Instant::now();
+            glim_services::telemetry::file_event("file_open_requested", &path, []);
             if path.is_dir() && !glim_services::preview::is_iwork(&path) {
-                open_folder(&path).map(Opened::Folder)
+                let result = open_folder(&path);
+                glim_services::telemetry::result("workspace_open", None, started, &result);
+                result.map(Opened::Folder)
             } else {
                 let result = read_content_cancellable(&path, &cancel).map(Box::new);
+                glim_services::telemetry::result("file_open", Some(&path), started, &result);
                 Ok(Opened::File(path, result))
             }
         });
@@ -152,9 +150,11 @@ impl Workspace {
             let _ = view.update_in(cx, |view, window, cx| {
                 let path = view.incoming_files.pop_front();
                 view.incoming_file_task = None;
-                if let Some(index) = view.tabs.iter().position(|r| {
-                    Some(&r.path) == path.as_ref() && !r.historical && r.diff.is_none()
-                }) {
+                if let Some(index) = view
+                    .tabs
+                    .iter()
+                    .position(|r| Some(&r.path) == path.as_ref())
+                {
                     view.activate_tab(index, window, cx);
                 } else {
                     match result {
@@ -189,11 +189,7 @@ impl Workspace {
         self.results.clear();
         self.search_task = None;
         self.pending_anchor = None;
-        if let Some(index) = self
-            .tabs
-            .iter()
-            .position(|t| t.path == path && t.diff.is_none() && !t.historical)
-        {
+        if let Some(index) = self.tabs.iter().position(|t| t.path == path) {
             self.activate_tab(index, window, cx);
             self.tabs[index].reveal_native(cx);
             return;
@@ -201,16 +197,21 @@ impl Workspace {
         if crate::app::reveal_existing_file(&path, Some(cx.entity_id()), cx) {
             return;
         }
+        glim_services::telemetry::file_event("file_open_requested", &path, []);
         self.restoring_roots = None;
         self.loading = true;
         self.loading_preview = Self::csv_preview_for_path(&path, cx);
         self.error = None;
         let (cancel, cancel_on_drop) = glim_services::work::Cancellation::task();
         let read = cx.background_executor().spawn(async move {
+            let started = std::time::Instant::now();
             if path.is_dir() && !glim_services::preview::is_iwork(&path) {
-                open_folder(&path).map(Opened::Folder)
+                let result = open_folder(&path);
+                glim_services::telemetry::result("workspace_open", None, started, &result);
+                result.map(Opened::Folder)
             } else {
                 let result = read_content_cancellable(&path, &cancel).map(Box::new);
+                glim_services::telemetry::result("file_open", Some(&path), started, &result);
                 Ok(Opened::File(path, result))
             }
         });
@@ -247,9 +248,7 @@ impl Workspace {
     ) {
         self.subscriptions.clear();
         self.explorer = None;
-        self.changes = None;
         self.roots.clear();
-        self.last_scan_warning = None;
         self.root = None;
         self.add_folder(snapshot, window, cx);
     }
@@ -263,9 +262,15 @@ impl Workspace {
         if crate::app::updates::busy(cx) {
             return;
         }
-        self.sidebar = super::Sidebar::Files;
         self.sidebar_visible = true;
         self.roots.push(snapshot.root.clone());
+        glim_services::telemetry::track(
+            "workspace_folder_added",
+            [(
+                "folder_count",
+                glim_services::telemetry::number(self.roots.len() as u64),
+            )],
+        );
         self.root = self.roots.first().cloned();
         if !self.loading && cx.try_global::<crate::app::ReaderPreferences>().is_some() {
             crate::app::remember_workspace(self.recent_id.clone(), self.roots.clone(), cx);
@@ -276,7 +281,7 @@ impl Workspace {
         self.watch_setup = None;
         self.watch_task = None;
         self.watch = None;
-        self.repository_task = None;
+        self.watch_scan_task = None;
         if let Some(explorer) = &self.explorer {
             explorer.update(cx, |v, cx| {
                 v.add_folder(snapshot.root, snapshot.entries, cx)
@@ -288,10 +293,12 @@ impl Workspace {
                 window,
                 |view, _, event, window, cx| match event {
                     ExplorerEvent::SelectionChanged => {
-                        view.sidebar_selection = None;
                         cx.notify();
                     }
                     ExplorerEvent::OpenFile(path) => view.open_path(path.clone(), window, cx),
+                    ExplorerEvent::NewFile(path) => {
+                        view.choose_new_file_in(path.clone(), window, cx)
+                    }
                     ExplorerEvent::TrashEntry(path) => view.confirm_trash(path.clone(), window, cx),
                     ExplorerEvent::RemoveFolder(root_id) => {
                         view.remove_folder(*root_id, window, cx)
@@ -320,42 +327,6 @@ impl Workspace {
             let (roots, expanded) = explorer.read(cx).expansion_state();
             crate::app::remember_explorer(roots, expanded, cx);
         }
-        if self.changes.is_none() {
-            let changes = cx.new(|cx| Changes::new(Vec::new(), window, cx));
-            self.subscriptions.push(cx.subscribe_in(
-                &changes,
-                window,
-                |view, _, event, window, cx| match event {
-                    ChangeSelected::Open(root, change) => {
-                        view.open_diff(root.clone(), change.clone(), window, cx)
-                    }
-                    ChangeSelected::Refresh => view.refresh(window, cx),
-                    ChangeSelected::Error(message) => {
-                        view.error = Some(message.clone().into());
-                        cx.notify();
-                    }
-                    ChangeSelected::Git(root, request) => {
-                        view.run_git(root.clone(), request.clone(), cx)
-                    }
-                    ChangeSelected::GitFinished => view.finish_git(window, cx),
-                    ChangeSelected::Commit(root, oid) => {
-                        view.open_commit(root.clone(), oid.clone(), window, cx)
-                    }
-                    ChangeSelected::CommitFile(root, oid, path) => view.open_commit_file(
-                        root.clone(),
-                        oid.clone(),
-                        Some(path.clone()),
-                        window,
-                        cx,
-                    ),
-                },
-            ));
-            changes.update(cx, |v, cx| {
-                v.set_loading(true, cx);
-                v.set_external_busy(self.git_edit_locked, cx);
-            });
-            self.changes = Some(changes);
-        }
         self.scan_workspace_roots(window, cx);
     }
 
@@ -365,7 +336,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if crate::app::updates::busy(cx) || self.git_busy || self.has_running_git(cx) {
+        if crate::app::updates::busy(cx) {
             return;
         }
         let Some(explorer) = self.explorer.clone() else {
@@ -381,30 +352,21 @@ impl Workspace {
         self.results.clear();
         self.search_task = None;
         self.pending_anchor = None;
-        self.last_scan_warning = None;
         if cx.try_global::<crate::app::RecentWorkspaces>().is_some() {
             crate::app::remember_workspace(self.recent_id.clone(), self.roots.clone(), cx);
         }
         let (roots, expanded) = explorer.read(cx).expansion_state();
         crate::app::remember_explorer(roots, expanded, cx);
-        if let Some(changes) = &self.changes {
-            changes.update(cx, |changes, cx| changes.set_repositories(Vec::new(), cx));
-        }
         self.scan_workspace_roots(window, cx);
         cx.notify();
     }
 
     fn scan_workspace_roots(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.refresh_task = None;
-        self.repository_task = None;
+        self.watch_scan_task = None;
         self.watch_setup = None;
         self.watch_task = None;
         self.watch = None;
-        if let Some(changes) = &self.changes {
-            changes.update(cx, |changes, cx| {
-                changes.set_loading(!self.roots.is_empty(), cx)
-            });
-        }
         if self.roots.is_empty() {
             if !self.tabs.is_empty() {
                 self.watch_file_parent(window, cx);
@@ -425,26 +387,15 @@ impl Workspace {
                     let _ = watch.add_path(path);
                 }
             }
-            let repositories = glim_services::workspace::repositories_for_roots(&roots);
-            if let Some(watch) = &mut watch {
-                let _ = watch.add_repositories(root, &repositories.repositories);
-            }
-            (roots, repositories, watch)
+            (roots, watch)
         });
-        self.repository_task = Some(cx.spawn_in(window, async move |view, cx| {
-            let (roots, repositories, watch) = work.await;
+        self.watch_scan_task = Some(cx.spawn_in(window, async move |view, cx| {
+            let (roots, watch) = work.await;
             let _ = view.update_in(cx, |view, window, cx| {
                 if view.roots != roots {
                     return;
                 }
-                view.repository_task = None;
-                view.report_scan_warning(repositories.warning(), true);
-                if let Some(changes) = &view.changes {
-                    changes.update(cx, |v, cx| {
-                        v.set_loading(false, cx);
-                        v.set_repositories(repositories.repositories, cx);
-                    });
-                }
+                view.watch_scan_task = None;
                 view.watch = watch;
                 view.start_watching(window, cx);
                 cx.notify();
@@ -455,12 +406,10 @@ impl Workspace {
         let path = match &content {
             Content::File(d) => d.path.clone(),
             Content::Page(d) => d.path.clone(),
-            Content::Commit(d, _) => d.path.clone(),
             Content::Image(d) => d.path.clone(),
             Content::XMind(d) => d.path.clone(),
             Content::Opml(d) => d.path.clone(),
             Content::Book(d) => d.path.clone(),
-            Content::Diff(d, root) => root.join(&d.change.path),
             Content::Sqlite(path) | Content::Native(path, ..) | Content::Unavailable(path, _) => {
                 path.clone()
             }
@@ -484,12 +433,10 @@ impl Workspace {
         match content {
             Content::File(d) => Reader::new(d, window, cx),
             Content::Page(d) => Reader::from_page(d, window, cx),
-            Content::Commit(d, file) => Reader::from_commit(d.path, d.text, file, window, cx),
             Content::Image(d) => Reader::from_image(d, window, cx),
             Content::XMind(d) => Reader::from_xmind(d, cx),
             Content::Opml(d) => Reader::from_opml(d, cx),
             Content::Book(d) => Reader::from_book(d, window, cx),
-            Content::Diff(d, r) => Reader::from_diff(d, &r, window, cx),
             Content::Sqlite(path) => Reader::from_sqlite(path, window, cx),
             Content::Native(path, folder, shuffle) => {
                 Reader::from_native(path, folder, shuffle, cx)
@@ -497,16 +444,38 @@ impl Workspace {
             Content::Unavailable(p, e) => Reader::unavailable(p, e, window, cx),
         }
     }
-    fn install_content(&mut self, content: Content, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn install_content(
+        &mut self,
+        content: Content,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let mut reader = Self::make_reader(content, window, cx);
-        reader.set_editing_locked(self.git_edit_locked, cx);
+        glim_services::telemetry::file_event(
+            "reader_opened",
+            &reader.path,
+            [
+                (
+                    "reader_kind",
+                    glim_services::telemetry::text(reader.telemetry_kind()),
+                ),
+                (
+                    "unavailable",
+                    glim_services::telemetry::flag(reader.is_unavailable()),
+                ),
+                (
+                    "can_preview",
+                    glim_services::telemetry::flag(reader.can_preview()),
+                ),
+                (
+                    "can_edit",
+                    glim_services::telemetry::flag(reader.editor().is_some()),
+                ),
+            ],
+        );
+        reader.set_editing_locked(self.editing_locked, cx);
         reader.set_word_wrap(self.word_wrap, window, cx);
-        if let Some(i) = self.tabs.iter().position(|t| {
-            t.path == reader.path
-                && t.historical == reader.historical
-                && t.commit_file == reader.commit_file
-                && t.diff.as_ref().map(|d| d.scope) == reader.diff.as_ref().map(|d| d.scope)
-        }) {
+        if let Some(i) = self.tabs.iter().position(|t| t.path == reader.path) {
             self.tabs[i] = reader;
             self.active = Some(i);
         } else {
@@ -528,102 +497,8 @@ impl Workspace {
             self.watch_file_parent(window, cx);
         }
     }
-    pub(super) fn open_commit(
-        &mut self,
-        root: PathBuf,
-        oid: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_commit_file(root, oid, None, window, cx);
-    }
-    pub(super) fn open_commit_file(
-        &mut self,
-        root: PathBuf,
-        oid: String,
-        file: Option<PathBuf>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if crate::app::updates::busy(cx) {
-            return;
-        }
-        let path = root.join(format!("Commit {oid}"));
-        if let Some(index) = self
-            .tabs
-            .iter()
-            .position(|r| r.historical && r.path == path && r.commit_file == file)
-        {
-            self.activate_tab(index, window, cx);
-            return;
-        }
-        self.loading = true;
-        self.loading_preview = false;
-        let requested_file = file.clone();
-        let work = cx.background_executor().spawn(async move {
-            let text = match requested_file {
-                Some(file) => {
-                    glim_services::git::management::commit_file_details(&root, &oid, &file)
-                }
-                None => glim_services::git::management::commit_details(&root, &oid),
-            };
-            text.map(|text| glim_services::binary::BytePreview { path, text })
-        });
-        self.load_task = Some(cx.spawn_in(window, async move |view, cx| {
-            let result = work.await;
-            let _ = view.update_in(cx, |v, window, cx| {
-                v.loading = false;
-                v.load_incoming_file(window, cx);
-                match result {
-                    Ok(document) => v.install_content(Content::Commit(document, file), window, cx),
-                    Err(e) => v.error = Some(format!("Commit: {e:#}").into()),
-                }
-                cx.notify();
-            });
-        }));
-        cx.notify();
-    }
-    pub(super) fn open_diff(
-        &mut self,
-        root: PathBuf,
-        change: GitChange,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.page = super::Page::Document;
-        if crate::app::updates::busy(cx) {
-            return;
-        }
-        self.pending_anchor = None;
-        if let Some(i) = self.tabs.iter().position(|t| {
-            t.path == root.join(&change.path)
-                && t.diff.as_ref().is_some_and(|d| d.scope == change.scope)
-        }) {
-            self.activate_tab(i, window, cx);
-            return;
-        }
-        self.loading = true;
-        self.loading_preview = false;
-        self.error = None;
-        let path = root.join(&change.path);
-        let read = cx.background_executor().spawn(async move {
-            read_diff(&root, &change)
-                .map(|d| Content::Diff(d, root))
-                .unwrap_or_else(|e| Content::Unavailable(path, format!("{e:#}")))
-        });
-        self.load_task = Some(cx.spawn_in(window, async move |view, cx| {
-            let content = read.await;
-            let _ = view.update_in(cx, |view, window, cx| {
-                view.loading = false;
-                view.load_incoming_file(window, cx);
-                view.install_content(content, window, cx);
-                cx.notify();
-            });
-        }));
-        cx.notify();
-    }
     pub(super) fn choose_add_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if crate::app::updates::busy(cx) {
+        if self.picking || crate::app::updates::busy(cx) {
             return;
         }
         self.picking = true;
@@ -679,7 +554,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if crate::app::updates::busy(cx) {
+        if self.picking || crate::app::updates::busy(cx) {
             return;
         }
         self.picking = true;
