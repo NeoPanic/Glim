@@ -190,22 +190,7 @@ impl Render for Workspace {
             .explorer
             .as_ref()
             .map(|v| v.clone().into_any_element())
-            .unwrap_or_else(|| {
-                v_flex()
-                    .p_3()
-                    .gap_3()
-                    .text_sm()
-                    .child(div().text_color(cx.theme().muted_foreground).child(
-                        glim_services::locale::tr("Open a folder to browse its files."),
-                    ))
-                    .child(
-                        Button::new("empty-open-folder")
-                            .w_full()
-                            .label(glim_services::locale::tr("Open Folder"))
-                            .on_click(cx.listener(|v, _, w, cx| v.choose_path(true, w, cx))),
-                    )
-                    .into_any_element()
-            });
+            .unwrap_or_else(|| div().into_any_element());
         let nav_height = 34.;
         let navigation = |id: &'static str, icon, label: &'static str, selected: bool| {
             let background = if selected {
@@ -256,15 +241,17 @@ impl Render for Workspace {
                 view.show_home(cx);
                 cx.notify();
             })))
-            .child(
-                div()
-                    .px_3()
-                    .pt_3()
-                    .pb_2()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(glim_services::locale::tr("Workspace")),
-            )
+            .when(self.explorer.is_some(), |sidebar| {
+                sidebar.child(
+                    div()
+                        .px_3()
+                        .pt_3()
+                        .pb_2()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(glim_services::locale::tr("Workspace")),
+                )
+            })
             .child(div().flex_1().min_h_0().w_full().child(panel_content))
             .id("workspace-sidebar");
         let sidebar = if self.explorer.is_none() {
