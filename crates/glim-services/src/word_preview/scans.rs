@@ -2,7 +2,11 @@
 use super::*;
 use std::io::Read;
 
-fn xml(archive: &mut zip::ZipArchive<File>, name: &str, cancel: &Cancellation) -> Result<String> {
+pub(super) fn xml(
+    archive: &mut zip::ZipArchive<File>,
+    name: &str,
+    cancel: &Cancellation,
+) -> Result<String> {
     let entry = archive.by_name(name)?;
     ensure!(
         entry.size() <= limits::IO_RECORD_BYTES as u64,

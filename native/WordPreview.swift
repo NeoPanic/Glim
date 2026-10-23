@@ -2,7 +2,7 @@ import Cocoa
 import WebKit
 import Quartz
 
-// Preserve Word layout by default; reflow is an explicit reading option.
+// Open the full-width reading view by default; original layout remains available.
 final class WordPreview: NSObject, WKNavigationDelegate {
     let view = NSView()
     private let body = NSView()
@@ -23,9 +23,9 @@ final class WordPreview: NSObject, WKNavigationDelegate {
     private var closed = false
     private var copyMonitor: Any?
     private var copyGeneration = 0
-    init(source: URL, imagePages: Bool = false, reading: URL?, extraControls: [NSView]) {
+    init(source: URL, imagePages _: Bool = false, reading: URL?, extraControls: [NSView]) {
         self.source = source; self.reading = reading
-        self.readingMode = imagePages && reading != nil
+        self.readingMode = reading != nil
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false

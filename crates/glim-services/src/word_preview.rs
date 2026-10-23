@@ -10,6 +10,7 @@ use std::{
     sync::{Mutex, TryLockError},
 };
 
+mod images;
 mod scans;
 
 static CONVERSION: Mutex<()> = Mutex::new(());
@@ -50,11 +51,12 @@ pub fn prepare(path: &Path, cancel: &Cancellation) -> Result<ReadingDocument> {
             cancel.check()?;
         }
     }
+    let (conversion_source, images) = images::prepare(path, directory.path(), cancel)?;
     let mut command = Command::new("/usr/bin/textutil");
     command
         .args(["-convert", "html", "-output"])
         .arg(&converted)
-        .arg(path)
+        .arg(&conversion_source)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -62,7 +64,7 @@ pub fn prepare(path: &Path, cancel: &Cancellation) -> Result<ReadingDocument> {
         crate::work::run(&mut command, cancel)?.success(),
         "Cannot convert this document to reading view"
     );
-    decorate(&converted, &html, cancel)?;
+    decorate_images(&converted, &html, cancel, &images)?;
     Ok(ReadingDocument {
         image_pages: false,
         html: std::fs::canonicalize(html)?,
@@ -125,6 +127,14 @@ fn relative_fonts(line: &str) -> String {
     output
 }
 fn decorate(source: &Path, destination: &Path, cancel: &Cancellation) -> Result<()> {
+    decorate_images(source, destination, cancel, &[])
+}
+fn decorate_images(
+    source: &Path,
+    destination: &Path,
+    cancel: &Cancellation,
+    images: &[(String, String)],
+) -> Result<()> {
     let input =
         crate::work::RecordReader::new(File::open(source)?, limits::IO_RECORD_BYTES, cancel);
     let mut input = BufReader::with_capacity(limits::IO_BUFFER_BYTES, input);
@@ -170,11 +180,15 @@ td, th { overflow-wrap:normal; }
 "#)?;
             decorated = true;
         }
-        if style {
-            output.write_all(relative_fonts(line).as_bytes())?;
+        let mut rendered = if style {
+            relative_fonts(line)
         } else {
-            output.write_all(line.as_bytes())?;
+            line.to_owned()
+        };
+        for (marker, image) in images {
+            rendered = rendered.replace(marker, image);
         }
+        output.write_all(rendered.as_bytes())?;
         if line.contains("</style>") {
             style = false;
         }

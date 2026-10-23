@@ -83,8 +83,16 @@ enum ReaderMenu {
     }
     static func own(_ item: NSMenuItem) {
         item.identifier = NSUserInterfaceItemIdentifier("glim-reader-action")
+        showImage(item)
         if item.image == nil, let symbol = symbol(for: item.title) {
             item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: item.title)
+        }
+    }
+    private static func showImage(_ item: NSMenuItem) {
+        // macOS 27 defaults to hiding menu images. Use the public property's
+        // setter dynamically so builds with older SDKs remain supported.
+        if item.responds(to: NSSelectorFromString("setPreferredImageVisibility:")) {
+            item.setValue(1, forKey: "preferredImageVisibility")
         }
     }
     private static func symbol(for title: String) -> String? {
@@ -93,8 +101,12 @@ enum ReaderMenu {
             ("Copy Preview Text", "doc.on.doc"), ("Cut", "scissors"), ("Paste", "doc.on.clipboard"),
             ("Select All", "selection.pin.in.out"), ("Extract Text", "text.viewfinder"),
             ("Recognize Image Text", "text.viewfinder"), ("Fit width", "arrow.left.and.right"),
+            ("Fit page", "arrow.up.left.and.arrow.down.right"),
+            ("Single Page", "doc"), ("Single Page Continuous", "doc.text"),
+            ("Two Pages", "book"), ("Two Pages Continuous", "book.pages"),
             ("Fit image", "arrow.up.left.and.arrow.down.right"), ("Actual size", "1.magnifyingglass"),
             ("Zoom in", "plus.magnifyingglass"), ("Zoom out", "minus.magnifyingglass"),
+            ("Original layout", "doc.richtext"), ("Reading mode", "text.alignleft"),
             ("Reset zoom", "arrow.counterclockwise"), ("Previous", "chevron.left"), ("Next", "chevron.right"),
             ("Previous page", "chevron.left"), ("Next page", "chevron.right"),
             ("Play Slideshow", "play.rectangle"), ("Play / Pause", "playpause"),
@@ -103,23 +115,14 @@ enum ReaderMenu {
         return entries.first(where: { L($0.0) == title })?.1
     }
     static func decorate(_ menu: NSMenu) {
-        guard !menu.items.contains(where: { $0.view is ReaderMenuIconRow }) else { return }
         for item in menu.items where !item.isSeparatorItem {
+            showImage(item)
+            if let submenu = item.submenu { decorate(submenu) }
             if item.image == nil, let symbol = symbol(for: item.title) {
                 item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: item.title)
             }
         }
-        // Retain the full textual menu. Destructive actions stay in named rows.
-        let quick = menu.items.filter { item in
-            guard item.submenu == nil, item.image != nil, !item.isHidden, !item.isSeparatorItem else { return false }
-            if let symbol = item.representedObject as? String,
-               ["trash", "folder.badge.minus"].contains(symbol) { return false }
-            return true
-        }.prefix(6)
-        guard quick.count >= 2 else { return }
-        let row = NSMenuItem(); row.identifier = NSUserInterfaceItemIdentifier("glim-reader-action")
-        row.view = ReaderMenuIconRow(items: Array(quick)); row.isEnabled = true
-        menu.insertItem(.separator(), at: 0); menu.insertItem(row, at: 0)
+
     }
 }
 
@@ -205,30 +208,4 @@ final class ReaderKeyboardShortcuts {
         }
     }
     deinit { if let monitor = monitor { NSEvent.removeMonitor(monitor) } }
-}
-
-
-private final class ReaderMenuIconAction: NSObject {
-    weak var item: NSMenuItem?
-    init(_ item: NSMenuItem) { self.item = item }
-    @objc func invoke(_ sender: NSButton) {
-        guard let item = item, item.isEnabled, !item.isHidden, let action = item.action else { return }
-        item.menu?.cancelTracking()
-        NSApp.sendAction(action, to: item.target, from: item)
-    }
-}
-private final class ReaderMenuIconRow: NSView {
-    private var actions: [ReaderMenuIconAction] = []
-    init(items: [NSMenuItem]) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 16 + items.count * 34, height: 38))
-        for (index, item) in items.enumerated() {
-            let command = ReaderMenuIconAction(item); actions.append(command)
-            let button = NSButton(image: item.image!, target: command, action: #selector(ReaderMenuIconAction.invoke(_:)))
-            button.frame = NSRect(x: 8 + index * 34, y: 4, width: 30, height: 30)
-            button.bezelStyle = .rounded; button.isBordered = true; button.imagePosition = .imageOnly
-            button.isEnabled = item.isEnabled; button.toolTip = item.title; button.setAccessibilityLabel(item.title)
-            addSubview(button)
-        }
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
 }
